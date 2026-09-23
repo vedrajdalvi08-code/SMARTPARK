@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMARTPARK | Smart Parking Management System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <div class="brand-icon">P</div>
+      <span>SMARTPARK</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html" class="active">Live Availability</a></li>
+      <li><a href="booking.html">Book a Spot</a></li>
+      <li><a href="payment.html">Pay & Exit</a></li>
+      <li><a href="admin.html">Admin & Simulator</a></li>
+      <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
+      <li><span class="badge-demo">Demo Mode Active</span></li>
+    </ul>
+  </nav>
+
+  <!-- Hero Section -->
+  <div class="container">
+    <section class="hero-section">
+      <h1 class="hero-title">Intelligent Parking, Zero Hassle.</h1>
+      <p class="hero-subtitle">
+        Real-time bay occupancy tracking, automated nearest-slot allocation via Min-Heap algorithms,
+        and instant digital QR parking passes.
+      </p>
+
+      <!-- Quick Action Buttons -->
+      <div style="display: flex; gap: 1rem; justify-content: center; margin-bottom: 2rem;">
+        <a href="booking.html" class="btn btn-primary">🚗 Reserve a Spot</a>
+        <a href="payment.html" class="btn btn-secondary">💳 Pay Parking Ticket</a>
+        <a href="admin.html" class="btn btn-secondary">⚡ Launch Hardware Simulator</a>
+      </div>
+    </section>
+
+    <!-- Key Metrics / Stats Bar -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Total Capacity</span>
+          <span class="stat-icon">🅿️</span>
+        </div>
+        <div class="stat-value" id="statTotalSlots">20</div>
+        <div class="stat-desc">Bays across Zones A, B, EV & C</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Available Slots</span>
+          <span class="stat-icon">🟢</span>
+        </div>
+        <div class="stat-value" id="statAvailSlots" style="color: var(--status-available);">--</div>
+        <div class="stat-desc">Ready for immediate parking</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Occupied Slots</span>
+          <span class="stat-icon">🔴</span>
+        </div>
+        <div class="stat-value" id="statOccupiedSlots" style="color: var(--status-occupied);">--</div>
+        <div class="stat-desc">Currently occupied bays</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Live Occupancy</span>
+          <span class="stat-icon">📊</span>
+        </div>
+        <div class="stat-value" id="statOccupancyRate">--%</div>
+        <div class="stat-desc">Real-time facility utilization</div>
+      </div>
+    </div>
+
+    <!-- Live Interactive Parking Map -->
+    <div class="parking-map-container">
+      <div class="map-controls">
+        <div class="zone-filter-tabs">
+          <button class="tab-btn active" onclick="filterSlots('ALL', this)">All Slots</button>
+          <button class="tab-btn" onclick="filterSlots('A', this)">Zone A (Compact)</button>
+          <button class="tab-btn" onclick="filterSlots('B', this)">Zone B (SUV & Bike)</button>
+          <button class="tab-btn" onclick="filterSlots('EV', this)">Zone EV (Fast Charge)</button>
+          <button class="tab-btn" onclick="filterSlots('FLOOR1', this)">Floor 1 (Deck)</button>
+        </div>
+
+        <div class="legend-group">
+          <div class="legend-item"><span class="legend-dot dot-avail"></span> Available</div>
+          <div class="legend-item"><span class="legend-dot dot-occup"></span> Occupied</div>
+          <div class="legend-item"><span class="legend-dot dot-res"></span> Reserved</div>
+          <div class="legend-item"><span class="legend-dot dot-ev"></span> EV Dedicated</div>
+        </div>
+      </div>
+
+      <!-- Real-time Parking Grid -->
+      <div class="parking-grid" id="parkingGrid">
+        <!-- Rendered dynamically by app.js -->
+      </div>
+    </div>
+
+    <!-- Dynamic Pricing Matrix -->
+    <section style="margin-top: 3rem; margin-bottom: 2rem;">
+      <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1.25rem;">Transparent Parking Tariffs</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Two-Wheeler / Bike</span>
+            <span class="stat-icon">🛵</span>
+          </div>
+          <div class="stat-value" style="font-size: 1.75rem;">₹10<span style="font-size: 1rem; color: var(--text-muted);">/hr</span></div>
+          <div class="stat-desc">Base fare: ₹10 (Includes 1 hr)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">Compact / Hatchback</span>
+            <span class="stat-icon">🚗</span>
+          </div>
+          <div class="stat-value" style="font-size: 1.75rem;">₹20<span style="font-size: 1rem; color: var(--text-muted);">/hr</span></div>
+          <div class="stat-desc">Base fare: ₹20 (Includes 1 hr)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">SUV / Large Vehicle</span>
+            <span class="stat-icon">🚙</span>
+          </div>
+          <div class="stat-value" style="font-size: 1.75rem;">₹30<span style="font-size: 1rem; color: var(--text-muted);">/hr</span></div>
+          <div class="stat-desc">Base fare: ₹30 (Includes 1 hr)</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-header">
+            <span class="stat-label">EV Dedicated Bay</span>
+            <span class="stat-icon">⚡</span>
+          </div>
+          <div class="stat-value" style="font-size: 1.75rem;">₹25<span style="font-size: 1rem; color: var(--text-muted);">/hr</span></div>
+          <div class="stat-desc">Includes Level-2 charging provision</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

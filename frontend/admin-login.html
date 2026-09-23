@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login | SMARTPARK</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav class="navbar">
+    <a href="/" class="nav-brand"><div class="brand-icon">P</div><span>SMARTPARK</span></a>
+    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button>
+  </nav>
+  <main class="auth-shell">
+    <form class="auth-card" id="adminLoginForm">
+      <div class="auth-kicker">Restricted area</div>
+      <h1>Administrator sign in</h1>
+      <p class="auth-copy">Use your SMARTPARK administrator account to open the simulator.</p>
+      <div class="form-group">
+        <label class="form-label" for="adminUsername">Username</label>
+        <input class="form-input" id="adminUsername" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="adminPassword">Password</label>
+        <input class="form-input" id="adminPassword" type="password" autocomplete="current-password" required>
+      </div>
+      <p class="auth-error" id="adminLoginError" role="alert"></p>
+      <button class="btn btn-primary btn-block" type="submit">Sign in to admin console</button>
+      <a class="auth-back" href="/">Return to live availability</a>
+    </form>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    document.getElementById("adminLoginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.getElementById("adminLoginError");
+      error.textContent = "";
+      const result = await fetchAPI("/admin/login", {
+        method: "POST",
+        body: JSON.stringify({
+          username: document.getElementById("adminUsername").value,
+          password: document.getElementById("adminPassword").value
+        })
+      });
+      if (result.ok && result.data.success) {
+        window.location.href = "/admin";
+      } else {
+        error.textContent = result.data.error || "Login failed";
+      }
+    });
+  </script>
+</body>
+</html>

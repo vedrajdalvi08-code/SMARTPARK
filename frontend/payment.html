@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment & Checkout | SMARTPARK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <div class="brand-icon">P</div>
+      <span>SMARTPARK</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Live Availability</a></li>
+      <li><a href="booking.html">Book a Spot</a></li>
+      <li><a href="payment.html" class="active">Pay & Exit</a></li>
+      <li><a href="admin.html">Admin & Simulator</a></li>
+      <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
+      <li><span class="badge-demo">Demo Mode Active</span></li>
+    </ul>
+  </nav>
+
+  <div class="container">
+    <div style="max-width: 650px; margin: 1.5rem auto;">
+      <h1 style="font-size: 2rem; font-weight: 800; margin-bottom: 0.5rem;">Parking Checkout & Payment</h1>
+      <p style="color: var(--text-muted); margin-bottom: 2rem;">
+        Enter your Vehicle Number or scan your Ticket Code to calculate current parking charges and settle payment before reaching the exit barrier.
+      </p>
+
+      <!-- Ticket Search Bar -->
+      <div class="sim-box" style="margin-bottom: 2rem;">
+        <div class="form-group" style="margin-bottom: 0.75rem;">
+          <label class="form-label" for="paymentSearchInput">Vehicle Number or Ticket Code</label>
+          <div style="display: flex; gap: 0.75rem;">
+            <input type="text" id="paymentSearchInput" class="form-input" placeholder="e.g. KA-01-MJ-5021 or SP-ABC12345" style="text-transform: uppercase;">
+            <button class="btn btn-primary" onclick="lookupTicketForPayment()" style="white-space: nowrap;">
+              🔍 Find Ticket
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Billing Details Card (Hidden until ticket is found) -->
+      <div class="sim-box" id="billingDetailsBox" style="display: none;">
+        <div class="sim-header">
+          <div class="sim-title">
+            <span>📄</span> Parking Fee Summary
+          </div>
+          <span class="badge-demo" id="billTicketCode">SP-########</span>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0;">
+            <span style="color: var(--text-muted);">Vehicle Plate:</span>
+            <strong id="billVehiclePlate">--</strong>
+          </div>
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0;">
+            <span style="color: var(--text-muted);">Parking Duration:</span>
+            <strong id="billDuration" style="color: var(--accent-light);">--</strong>
+          </div>
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0;">
+            <span style="color: var(--text-muted);">Base Tariff (1st Hour):</span>
+            <span id="billBaseRate">₹0.00</span>
+          </div>
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0;">
+            <span style="color: var(--text-muted);">Additional Duration:</span>
+            <span id="billAdditionalHours">0 hrs</span>
+          </div>
+          <div class="ticket-meta-row" id="billPeakRow" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0; display: none;">
+            <span style="color: #f59e0b;">⚡ Peak-Hour Surcharge (1.25x):</span>
+            <span id="billPeakSurcharge" style="color: #f59e0b;">₹0.00</span>
+          </div>
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 0.95rem; padding: 0.6rem 0;">
+            <span style="color: var(--text-muted);">Taxes (GST 5%):</span>
+            <span id="billTax">₹0.00</span>
+          </div>
+          <div class="ticket-meta-row" style="color: var(--text-main); font-size: 1.25rem; font-weight: 800; padding: 0.85rem 0; border-top: 2px solid var(--border-subtle);">
+            <span>Total Payable:</span>
+            <span id="billGrandTotal" style="color: var(--status-available);">₹0.00</span>
+          </div>
+        </div>
+
+        <!-- Simulated Payment Options -->
+        <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-muted);">Choose Simulated Payment Method:</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1.25rem;">
+          <button class="btn btn-secondary" onclick="executeSimulatedPayment('UPI_QR')">
+            📱 UPI QR Code
+          </button>
+          <button class="btn btn-secondary" onclick="executeSimulatedPayment('FASTAG_SIM')">
+            🚗 FASTag Auto-Debit
+          </button>
+          <button class="btn btn-secondary" onclick="executeSimulatedPayment('CREDIT_CARD')">
+            💳 Credit / Debit Card
+          </button>
+          <button class="btn btn-secondary" onclick="executeSimulatedPayment('CASH')">
+            💵 Cash at Exit
+          </button>
+        </div>
+
+        <button id="processPaymentBtn" class="btn btn-success btn-block" style="padding: 0.85rem; font-size: 1rem;" onclick="executeSimulatedPayment('UPI_QR')">
+          ✓ Settle & Authorize Gate Exit
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Receipt Modal -->
+  <div class="modal-overlay" id="paymentReceiptModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-weight: 700; color: var(--status-available);">Payment Receipt</h3>
+        <button class="modal-close" onclick="closeModal('paymentReceiptModal')">&times;</button>
+      </div>
+
+      <div class="ticket-qr-card">
+        <div style="font-size: 0.8rem; color: #15803d; font-weight: 800; margin-bottom: 0.5rem;">PAID & AUTHORIZED</div>
+        <div style="font-size: 1.8rem; font-weight: 900; color: #111827;" id="receiptAmount">₹0.00</div>
+
+        <div style="margin-top: 1.25rem;">
+          <div class="ticket-meta-row">
+            <span>Ticket Ref:</span>
+            <strong id="receiptTicketCode">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Vehicle:</span>
+            <strong id="receiptVehiclePlate">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Method:</span>
+            <span id="receiptMethod">--</span>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Settlement Time:</span>
+            <span id="receiptTimestamp">--</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size: 0.825rem; color: var(--text-muted); text-align: center; margin-bottom: 1rem;">
+        Show this barcode at the exit camera or drive to the exit barrier to trigger automatic ANPR clearance.
+      </p>
+
+      <button class="btn btn-primary btn-block" onclick="window.location.href='admin.html'">
+        🚗 Proceed to Exit Gate Simulator
+      </button>
+    </div>
+  </div>
+
+  <footer>
+    <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

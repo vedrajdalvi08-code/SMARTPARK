@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reserve a Slot | SMARTPARK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <div class="brand-icon">P</div>
+      <span>SMARTPARK</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Live Availability</a></li>
+      <li><a href="booking.html" class="active">Book a Spot</a></li>
+      <li><a href="payment.html">Pay & Exit</a></li>
+      <li><a href="admin.html">Admin & Simulator</a></li>
+      <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
+      <li><span class="badge-demo">Demo Mode Active</span></li>
+    </ul>
+  </nav>
+
+  <div class="container">
+    <div style="max-width: 680px; margin: 1rem auto;">
+      <h1 style="font-size: 2rem; font-weight: 800; margin-bottom: 0.5rem;">Pre-Book Parking Slot</h1>
+      <p style="color: var(--text-muted); margin-bottom: 2rem;">
+        Reserve an optimal bay in advance. Our Min-Heap Priority Queue automatically matches your vehicle with the nearest available bay to the entrance.
+      </p>
+
+      <div class="sim-box">
+        <form id="bookingForm">
+          <div class="form-group">
+            <label class="form-label" for="bookVehicleNumber">Vehicle Registration Number *</label>
+            <input type="text" id="bookVehicleNumber" class="form-input" placeholder="e.g. KA-01-MJ-5021" required style="font-family: monospace; text-transform: uppercase;">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="bookVehicleType">Vehicle Category</label>
+            <select id="bookVehicleType" class="form-select">
+              <option value="COMPACT">Compact / Sedan / Hatchback (Base ₹20/hr)</option>
+              <option value="SUV">SUV / MUV / Premium (Base ₹30/hr)</option>
+              <option value="TWO_WHEELER">Two-Wheeler / Bike / Scooter (Base ₹10/hr)</option>
+              <option value="EV">Electric Vehicle (with EV Charger - Base ₹25/hr)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="bookingTime">Parking Date and Time *</label>
+            <input type="datetime-local" id="bookingTime" class="form-input" required>
+            <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">
+              Choose when you plan to arrive. This scheduled time is saved with your online booking.
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="prefSlotNumber">Preferred Slot (Optional)</label>
+            <input type="text" id="prefSlotNumber" class="form-input" placeholder="Leave empty for Min-Heap Auto-Allocation">
+            <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">
+              💡 Tip: Click any available green slot on the map below to auto-select.
+            </small>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block" style="padding: 0.85rem; font-size: 1rem; margin-top: 1.5rem;">
+            🎟️ Generate Digital QR Parking Pass
+          </button>
+        </form>
+      </div>
+
+      <!-- Quick Spot Picker Map -->
+      <div style="margin-top: 2.5rem;">
+        <h3 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1rem;">Select Bay from Live Grid</h3>
+        <div class="parking-grid" id="parkingGrid">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Digital QR Ticket Pass Modal -->
+  <div class="modal-overlay" id="ticketPassModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-weight: 700;">Digital Parking Pass</h3>
+        <button class="modal-close" onclick="closeModal('ticketPassModal')">&times;</button>
+      </div>
+
+      <div class="ticket-qr-card">
+        <div style="font-size: 0.75rem; letter-spacing: 0.05em; color: #64748b; font-weight: 700;">SMARTPARK ACCESS PASS</div>
+        <img id="modalQrImage" class="qr-code-img" alt="QR Pass">
+        <div style="font-weight: 800; font-size: 1.2rem; margin-top: 0.25rem;" id="modalTicketCode">SP-########</div>
+
+        <div style="margin-top: 1rem;">
+          <div class="ticket-meta-row">
+            <span>Vehicle:</span>
+            <strong id="modalPlateNumber">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Assigned Bay:</span>
+            <strong id="modalSlotNumber" style="color: #2563eb;">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Scheduled Parking Time:</span>
+            <span id="modalEntryTime">--</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalNavInstructions">
+        <!-- Turn by turn guidance injected here -->
+      </div>
+
+      <button class="btn btn-secondary btn-block" style="margin-top: 1rem;" onclick="window.print()">
+        🖨️ Print / Save Pass
+      </button>
+    </div>
+  </div>
+
+  <footer>
+    <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

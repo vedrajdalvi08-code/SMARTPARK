@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard & Hardware Simulator | SMARTPARK</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">
+      <div class="brand-icon">P</div>
+      <span>SMARTPARK</span>
+    </a>
+    <ul class="nav-links">
+      <li><a href="index.html">Live Availability</a></li>
+      <li><a href="booking.html">Book a Spot</a></li>
+      <li><a href="payment.html">Pay & Exit</a></li>
+      <li><a href="/admin" class="active">Admin & Simulator</a></li>
+      <li><span class="badge-demo">Demo Mode Active</span></li>
+      <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
+    </ul>
+  </nav>
+
+  <div class="container" style="max-width: 1300px;">
+    <!-- Dashboard Top Bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+      <div>
+        <h1 style="font-size: 1.85rem; font-weight: 800;">Hardware Simulator & Admin Console</h1>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">
+          Control virtual barriers, simulate ESP32-CAM ANPR recognition, IR sensor triggers, and manage facility operations.
+        </p>
+      </div>
+      <div>
+        <button class="btn btn-danger" onclick="resetDemoSystem()">
+          🔄 Reset Demo (Clear All Slots)
+        </button>
+        <button class="btn btn-secondary" onclick="adminLogout()">Log out</button>
+      </div>
+    </div>
+
+    <div class="settings-strip">
+      <div>
+        <strong>Simulation mode</strong>
+        <span id="demoModeStatus">Loading setting...</span>
+      </div>
+      <label class="switch-control">
+        <input type="checkbox" id="demoModeToggle" onchange="setDemoMode(this.checked)">
+        <span class="switch-slider"></span>
+      </label>
+    </div>
+
+    <!-- Live Metrics Overview -->
+    <div class="stats-grid" style="margin-bottom: 1.5rem;">
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Facility Occupancy</span>
+          <span class="stat-icon">📊</span>
+        </div>
+        <div class="stat-value" id="adminOccupancyRate">0%</div>
+        <div class="stat-desc">Live capacity ratio</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Vehicles Handled Today</span>
+          <span class="stat-icon">🚘</span>
+        </div>
+        <div class="stat-value" id="adminVehiclesToday">0</div>
+        <div class="stat-desc">Total arrivals logged</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Simulated Revenue</span>
+          <span class="stat-icon">💰</span>
+        </div>
+        <div class="stat-value" id="adminRevenueToday" style="color: var(--status-available);">₹0.00</div>
+        <div class="stat-desc">Settled parking fees</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-label">Active Hardware</span>
+          <span class="stat-icon">📡</span>
+        </div>
+        <div class="stat-value" style="font-size: 1.35rem; color: #38bdf8;">Virtual Twin</div>
+        <div class="stat-desc">2x Servos, 4x IR, 2x CAMs</div>
+      </div>
+    </div>
+
+    <!-- Main Dual Layout: Simulator Controls (Left) and Live Grid (Right) -->
+    <div class="sim-grid">
+      
+      <!-- ============================================== -->
+      <!-- 1. ENTRY GATE SIMULATOR -->
+      <!-- ============================================== -->
+      <div class="sim-box">
+        <div class="sim-header">
+          <div class="sim-title">
+            <span>📷</span> Entry Gate 1 (ESP32-CAM & Barrier)
+          </div>
+          <span class="badge-demo">IR Sensor: Active</span>
+        </div>
+
+        <!-- Virtual Barrier Servo Visualization -->
+        <div class="barrier-visualizer" id="entryBarrierBox">
+          <div class="servo-pillar">
+            <div class="servo-boom"></div>
+          </div>
+          <div class="barrier-status-text">BARRIER CLOSED (0°)</div>
+        </div>
+
+        <!-- Virtual License Plate Preview -->
+        <div style="text-align: center;">
+          <div class="plate-preview-box">
+            <span class="plate-flag">IND</span>
+            <span id="simPlatePreview">KA-01-MJ-5021</span>
+          </div>
+        </div>
+
+        <!-- Simulator Input Controls -->
+        <div class="form-group">
+          <label class="form-label" for="simVehicleNumber">Vehicle Number Plate</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input type="text" id="simVehicleNumber" class="form-input" value="KA-01-MJ-5021" style="font-family: monospace; text-transform: uppercase;" oninput="document.getElementById('simPlatePreview').innerText = this.value || 'ENTER PLATE'">
+            <button type="button" class="btn btn-secondary" onclick="getRandomDemoPlate()">
+              🎲 Random
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="simVehicleType">Vehicle Classification</label>
+          <select id="simVehicleType" class="form-select">
+            <option value="COMPACT">Compact / Hatchback / Sedan</option>
+            <option value="SUV">SUV / Large Vehicle</option>
+            <option value="TWO_WHEELER">Two-Wheeler / Bike</option>
+            <option value="EV">Electric Vehicle (EV Bay)</option>
+          </select>
+        </div>
+
+        <button class="btn btn-primary btn-block" style="padding: 0.85rem;" onclick="triggerSimulatedEntry()">
+          ⚡ Trigger IR Sensor & Vehicle Arrival
+        </button>
+      </div>
+
+      <!-- ============================================== -->
+      <!-- 2. EXIT GATE SIMULATOR -->
+      <!-- ============================================== -->
+      <div class="sim-box">
+        <div class="sim-header">
+          <div class="sim-title">
+            <span>🏁</span> Exit Gate 1 (ESP32-CAM & Barrier)
+          </div>
+          <span class="badge-demo">IR Sensor: Active</span>
+        </div>
+
+        <!-- Virtual Barrier Servo Visualization -->
+        <div class="barrier-visualizer" id="exitBarrierBox">
+          <div class="servo-pillar">
+            <div class="servo-boom"></div>
+          </div>
+          <div class="barrier-status-text">BARRIER CLOSED (0°)</div>
+        </div>
+
+        <div class="form-group" style="margin-top: 1.25rem;">
+          <label class="form-label" for="simExitVehicleSelect">Select Currently Parked Vehicle</label>
+          <select id="simExitVehicleSelect" class="form-select">
+            <option value="">Loading parked vehicles...</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="simExitManualInput">Or Enter Ticket Code / Plate Manually</label>
+          <input type="text" id="simExitManualInput" class="form-input" placeholder="e.g. SP-ABC12345 or KA-01-MJ-5021">
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+          <button class="btn btn-success btn-block" style="padding: 0.85rem;" onclick="triggerSimulatedExit()">
+            🏁 Trigger Exit Gate & Release Bay
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Live Interactive Parking Lot Grid -->
+    <div class="parking-map-container">
+      <div class="map-controls">
+        <div class="sim-title">
+          <span>🅿️</span> Live 2D Facility Layout (Ground Floor & Floor 1)
+        </div>
+        <div class="zone-filter-tabs">
+          <button class="tab-btn active" onclick="filterSlots('ALL', this)">All (20)</button>
+          <button class="tab-btn" onclick="filterSlots('A', this)">Zone A</button>
+          <button class="tab-btn" onclick="filterSlots('B', this)">Zone B</button>
+          <button class="tab-btn" onclick="filterSlots('EV', this)">Zone EV</button>
+          <button class="tab-btn" onclick="filterSlots('FLOOR1', this)">Floor 1</button>
+        </div>
+      </div>
+
+      <div class="parking-grid" id="parkingGrid">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+
+    <!-- Live Audit Telemetry & ANPR Gate Log Terminal -->
+    <div class="sim-box" style="margin-bottom: 2.5rem;">
+      <div class="sim-header">
+        <div class="sim-title">
+          <span>💻</span> Live ANPR & Hardware Telemetry Audit Stream
+        </div>
+        <span style="font-size: 0.8rem; color: var(--text-subtle);">Auto-refreshing every 4s</span>
+      </div>
+
+      <div class="log-terminal" id="adminGateLogFeed">
+        <div class="log-entry">
+          <span class="log-time">[SYSTEM]</span>
+          <span class="log-type-entry">READY</span>
+          <span>SMARTPARK Hardware Simulator ready. Listening for sensor events.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Digital QR Ticket Pass Modal -->
+  <div class="modal-overlay" id="ticketPassModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-weight: 700;">Simulated Ticket & Pass</h3>
+        <button class="modal-close" onclick="closeModal('ticketPassModal')">&times;</button>
+      </div>
+
+      <div class="ticket-qr-card">
+        <div style="font-size: 0.75rem; letter-spacing: 0.05em; color: #64748b; font-weight: 700;">SMARTPARK ENTRY PASS</div>
+        <img id="modalQrImage" class="qr-code-img" alt="QR Pass">
+        <div style="font-weight: 800; font-size: 1.2rem; margin-top: 0.25rem;" id="modalTicketCode">SP-########</div>
+
+        <div style="margin-top: 1rem;">
+          <div class="ticket-meta-row">
+            <span>Vehicle Plate:</span>
+            <strong id="modalPlateNumber">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Allocated Bay:</span>
+            <strong id="modalSlotNumber" style="color: #2563eb;">--</strong>
+          </div>
+          <div class="ticket-meta-row">
+            <span>Entry Timestamp:</span>
+            <span id="modalEntryTime">--</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalNavInstructions">
+        <!-- Turn by turn guidance injected here -->
+      </div>
+
+      <button class="btn btn-secondary btn-block" style="margin-top: 1rem;" onclick="closeModal('ticketPassModal')">
+        Close Window
+      </button>
+    </div>
+  </div>
+
+  <footer>
+    <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    // Initialize admin-specific data on load
+    document.addEventListener("DOMContentLoaded", () => {
+      loadAnalytics();
+      getRandomDemoPlate();
+    });
+  </script>
+</body>
+</html>
