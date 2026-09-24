@@ -19,13 +19,15 @@ os.environ.setdefault("FLASK_ENV", "production")
 os.environ.setdefault("FLASK_DEBUG", "0")
 
 # Import and create Flask app
-from app import create_app, start_barrier_auto_reset_daemon
+from app import create_app
 
 app = create_app()
-start_barrier_auto_reset_daemon()
 
 if __name__ == "__main__":
     # This block is only reached when running via `python wsgi.py` directly
     # Gunicorn uses `wsgi:app` so this path is skipped in production
+    from app import start_barrier_auto_reset_daemon
+
+    start_barrier_auto_reset_daemon()
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
