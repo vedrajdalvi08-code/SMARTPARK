@@ -1,0 +1,1 @@
+"""SMARTPARK backend package."""
