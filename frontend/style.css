@@ -174,6 +174,25 @@ body {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.admin-navbar .nav-links {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-left: 1rem;
+}
+
+.admin-navbar .nav-links a {
+  font-size: 0.78rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.admin-navbar .badge-demo {
+  font-size: 0.68rem;
+  padding: 0.18rem 0.45rem;
+}
+
 .badge-demo {
   background: rgba(16, 185, 129, 0.2);
   color: #34d399;
@@ -481,6 +500,58 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.testing-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.qr-scanner-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 1rem;
+}
+
+.qr-camera-preview {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #020617;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.qr-scan-result {
+  margin-top: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  min-height: 4rem;
+}
+
+.qr-scan-success { color: var(--status-available); font-weight: 700; }
+.qr-scan-error { color: var(--status-occupied); font-weight: 700; }
+
+.qr-details-grid {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  gap: 0.45rem 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.qr-details-grid span { color: var(--text-subtle); }
+.qr-details-grid strong { overflow-wrap: anywhere; }
+.qr-action-row { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+
+@media (max-width: 700px) {
+  .qr-scanner-layout { grid-template-columns: 1fr; }
+  .testing-shortcuts .btn { flex: 1 1 140px; }
 }
 
 /* Virtual Barrier Gate Visualizer */
@@ -829,6 +900,11 @@ footer {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
+  .admin-navbar .nav-links {
+    margin-left: 0;
     gap: 0.35rem;
   }
 

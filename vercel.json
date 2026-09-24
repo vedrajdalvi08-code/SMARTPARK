@@ -1,63 +1,48 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
   "builds": [
     {
-      "src": "frontend/index.html",
-      "use": "@vercel/static"
+      "src": "api/index.py",
+      "use": "@vercel/python"
     },
     {
-      "src": "frontend/booking.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "frontend/payment.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "frontend/admin.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "frontend/admin-login.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "frontend/style.css",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "frontend/app.js",
+      "src": "frontend/**",
       "use": "@vercel/static"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "${BACKEND_URL}/api/$1"
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/",
+      "dest": "/frontend/index.html"
     },
     {
       "src": "/admin/login",
-      "dest": "/admin-login.html"
+      "dest": "/frontend/admin-login.html"
     },
     {
       "src": "/admin",
-      "dest": "/admin.html"
+      "dest": "/frontend/admin.html"
     },
     {
       "src": "/booking",
-      "dest": "/booking.html"
+      "dest": "/frontend/booking.html"
     },
     {
       "src": "/payment",
-      "dest": "/payment.html"
+      "dest": "/frontend/payment.html"
     },
     {
       "src": "/admin.html",
-      "dest": "/admin.html"
+      "dest": "/frontend/admin.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/frontend/$1"
     }
   ]
 }

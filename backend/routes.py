@@ -18,7 +18,7 @@ from database import (
 )
 from services import (
     SlotAllocationService, ANPRService, BillingService,
-    IoTGatewayService, facility_graph
+    IoTGatewayService, facility_graph, utc_naive
 )
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -74,6 +74,67 @@ def admin_me():
     if not session.get("admin_user"):
         return jsonify({"authenticated": False}), 401
     return jsonify({"authenticated": True, "user": session["admin_user"]})
+
+
+def _qr_ticket_details(ticket):
+    """Return scanner-safe booking/session data without exposing secrets."""
+    slot = ticket.slot
+    user = ticket.user
+    if ticket.status == "COMPLETED":
+        entry_status = "COMPLETED"
+    elif slot and slot.status == "OCCUPIED":
+        entry_status = "ENTERED"
+    else:
+        entry_status = "NOT_ENTERED"
+
+    return {
+        "booking_id": ticket.ticket_code,
+        "vehicle_number": ticket.vehicle_number,
+        "vehicle_type": ticket.vehicle_type,
+        "user": {
+            "username": user.username,
+            "full_name": user.full_name,
+            "email": user.email
+        } if user else None,
+        "slot": slot.to_dict() if slot else None,
+        "booking_time": ticket.booking_time.isoformat() if ticket.booking_time else None,
+        "booking_status": ticket.status,
+        "entry_status": entry_status,
+        "entry_time": ticket.entry_time.isoformat() if entry_status != "NOT_ENTERED" else None,
+        "exit_time": ticket.exit_time.isoformat() if ticket.exit_time else None,
+        "payment_status": ticket.payment_status,
+        "ticket": ticket.to_dict()
+    }
+
+
+@api.route("/admin/qr/scan", methods=["POST"])
+@admin_required
+def scan_admin_qr():
+    """Validate a booking/session token for the authenticated admin scanner."""
+    session_db = database.SessionLocal()
+    try:
+        data = request.get_json(silent=True) or {}
+        raw_token = str(data.get("token") or data.get("qr_token") or "").strip()
+        if raw_token.upper().startswith("SMARTPARK:"):
+            raw_token = raw_token.split(":", 1)[1].strip()
+        token = raw_token.upper()
+        if not token or len(token) > 64:
+            return jsonify({"success": False, "error": "A valid booking QR token is required."}), 400
+
+        ticket = session_db.query(Ticket).filter_by(ticket_code=token).first()
+        if not ticket:
+            return jsonify({"success": False, "error": "Invalid or expired QR token."}), 404
+
+        details = _qr_ticket_details(ticket)
+        if ticket.status != "ACTIVE":
+            return jsonify({
+                "success": False,
+                "error": f"This QR token belongs to a {ticket.status.lower()} booking and cannot be used.",
+                "booking": details
+            }), 409
+        return jsonify({"success": True, "message": "QR token validated.", "booking": details})
+    finally:
+        session_db.close()
 
 
 @api.route("/admin/settings/demo-mode", methods=["GET"])
@@ -214,7 +275,7 @@ def reserve_slot():
         slot.status = "RESERVED"
         slot.active_vehicle_number = vehicle_number
 
-        ticket_code = f"SP-{uuid.uuid4().hex[:8].upper()}"
+        ticket_code = f"SP-{uuid.uuid4().hex.upper()}"
         ticket = Ticket(
             ticket_code=ticket_code,
             vehicle_number=vehicle_number,
@@ -263,16 +324,53 @@ def _recognize_vehicle(data):
     return ANPRService.recognize_from_image(image_data), image_data
 
 
-def _autonomous_entry(data, session):
+def _autonomous_entry(data, session, use_hardware=True):
     vehicle_type = str(data.get("vehicle_type", "COMPACT")).upper()
     trigger_source = data.get("trigger_source", "ESP32_CAM")
+    booking_token = data.get("booking_id") or data.get("ticket_code") or data.get("qr_token")
     anpr_result, image_data = _recognize_vehicle(data)
     vehicle_number = anpr_result["plate_number"]
 
-    active_ticket = session.query(Ticket).filter(
-        Ticket.vehicle_number == vehicle_number,
-        Ticket.status == "ACTIVE"
-    ).first()
+    if booking_token:
+        active_ticket = session.query(Ticket).filter_by(
+            ticket_code=str(booking_token).strip().upper(),
+            status="ACTIVE"
+        ).first()
+        if not active_ticket:
+            return None, {
+                "success": False,
+                "error": "Invalid, expired, or completed booking token.",
+                "entry_authorized": False
+            }, 404
+        if active_ticket.vehicle_number != vehicle_number and data.get("vehicle_number"):
+            return None, {
+                "success": False,
+                "error": "Vehicle number does not match this booking.",
+                "entry_authorized": False
+            }, 409
+        booking_time = utc_naive(active_ticket.booking_time)
+        if booking_time and booking_time > datetime.datetime.utcnow():
+            return None, {
+                "success": False,
+                "error": "This booking is not active yet. Entry is allowed from the scheduled time.",
+                "entry_authorized": False,
+                "booking_time": booking_time.isoformat()
+            }, 409
+        active_ticket_slot = active_ticket.slot
+        if not active_ticket_slot or active_ticket_slot.status != "RESERVED":
+            return None, {
+                "success": False,
+                "error": "This booking has already entered or its reserved slot is unavailable.",
+                "entry_authorized": False
+            }, 409
+        vehicle_number = active_ticket.vehicle_number
+        anpr_result["plate_number"] = vehicle_number
+    else:
+        active_ticket = session.query(Ticket).filter(
+            Ticket.vehicle_number == vehicle_number,
+            Ticket.status == "ACTIVE"
+        ).first()
+
     if active_ticket:
         if active_ticket.slot.status != "RESERVED":
             return None, {
@@ -296,7 +394,7 @@ def _autonomous_entry(data, session):
                 "error": nav_info,
                 "entry_authorized": False
             }, 409
-        ticket_code = f"SP-{uuid.uuid4().hex[:8].upper()}"
+        ticket_code = f"SP-{uuid.uuid4().hex.upper()}"
         rates = Config.RATES.get(vehicle_type, Config.RATES["COMPACT"])
         ticket = Ticket(
             ticket_code=ticket_code,
@@ -323,8 +421,10 @@ def _autonomous_entry(data, session):
     )
     session.add(gate_log)
     session.flush()
-    barrier_status = IoTGatewayService.trigger_entry_barrier("OPEN")
-    IoTGatewayService.set_ir_sensor("IR_ENTRY", True)
+    barrier_status = {"mode": "SOFTWARE_ONLY", "status": "SIMULATED"}
+    if use_hardware:
+        barrier_status = IoTGatewayService.trigger_entry_barrier("OPEN")
+        IoTGatewayService.set_ir_sensor("IR_ENTRY", True)
     nav_info = facility_graph.get_shortest_path("ENTRY_GATE", slot.slot_number)
     session.commit()
     return ticket, {
@@ -361,98 +461,13 @@ def automatic_entry():
 @api.route("/entry/simulate", methods=["POST"])
 @admin_required
 def simulate_entry():
-    """
-    Simulates or processes a vehicle arrival at the Entry Gate.
-    1. Runs ANPR on uploaded image or synthetic plate generator.
-    2. Min-Heap Priority Queue finds nearest optimal slot.
-    3. Generates QR Ticket with secure token.
-    4. Triggers Entry Barrier Servo (opens to 90 degrees).
-    5. Returns driving navigation instructions.
-    """
+    """Run a software-only walk-in or secure booking entry simulation."""
     session = database.SessionLocal()
     try:
         data = request.get_json() or {}
-        image_data = data.get("image_snapshot")
-        provided_plate = data.get("vehicle_number")
-        vehicle_type = data.get("vehicle_type", "COMPACT").upper()
-        trigger_source = data.get("trigger_source", "MANUAL_SIM")
-
-        # 1. ANPR Processing
-        if provided_plate and provided_plate.strip():
-            anpr_result = {
-                "plate_number": ANPRService.clean_plate_number(provided_plate.strip()),
-                "confidence": 99.0,
-                "is_synthetic": True,
-                "method": "MANUAL_INPUT"
-            }
-        else:
-            anpr_result = ANPRService.recognize_from_image(image_data)
-
-        vehicle_number = anpr_result["plate_number"]
-
-        # Check if already in parking lot
-        active_ticket = session.query(Ticket).filter(
-            Ticket.vehicle_number == vehicle_number,
-            Ticket.status == "ACTIVE"
-        ).first()
-
-        if active_ticket:
-            return jsonify({
-                "success": False,
-                "error": f"Vehicle {vehicle_number} is already recorded inside the facility at slot {active_ticket.slot.slot_number}!",
-                "ticket": active_ticket.to_dict()
-            }), 400
-
-        # 2. Min-Heap Allocation
-        slot, nav_info = SlotAllocationService.find_and_assign_slot(session, vehicle_type, vehicle_number)
-        if not slot:
-            return jsonify({
-                "success": False,
-                "error": nav_info  # error message returned
-            }), 400
-
-        # 3. Create Ticket
-        ticket_code = f"SP-{uuid.uuid4().hex[:8].upper()}"
-        rates = Config.RATES.get(vehicle_type, Config.RATES["COMPACT"])
-
-        ticket = Ticket(
-            ticket_code=ticket_code,
-            vehicle_number=vehicle_number,
-            vehicle_type=vehicle_type,
-            slot_id=slot.id,
-            entry_time=datetime.datetime.utcnow(),
-            base_rate=rates["base"],
-            payment_status="PENDING",
-            status="ACTIVE"
-        )
-        session.add(ticket)
-
-        # 4. Trigger Entry Barrier Servo
-        barrier_status = IoTGatewayService.trigger_entry_barrier("OPEN")
-        IoTGatewayService.set_ir_sensor("IR_ENTRY", True)
-
-        # 5. Gate Log Audit Record
-        gate_log = GateLog(
-            gate_type="ENTRY",
-            vehicle_number=vehicle_number,
-            anpr_confidence=anpr_result.get("confidence", 95.0),
-            trigger_source=trigger_source,
-            action_taken="GATE_OPENED",
-            image_snapshot=image_data[:200] if image_data else None,
-            notes=f"Allocated Slot {slot.slot_number} ({slot.slot_type}) via Min-Heap"
-        )
-        session.add(gate_log)
-        session.commit()
-
-        return jsonify({
-            "success": True,
-            "message": f"Vehicle {vehicle_number} entered. Gate opened!",
-            "anpr": anpr_result,
-            "allocated_slot": slot.to_dict(),
-            "ticket": ticket.to_dict(),
-            "navigation": nav_info,
-            "barrier_state": barrier_status
-        })
+        data["trigger_source"] = "MANUAL_SIM"
+        _, response, status = _autonomous_entry(data, session, use_hardware=False)
+        return jsonify(response), status
 
     except Exception as e:
         session.rollback()
@@ -602,7 +617,7 @@ def _authorize_exit(session_db, identifier, trigger_source="ESP32_CAM"):
     }, 200
 
 
-def _complete_exit(session_db, identifier=None, trigger_source="IR_SENSOR"):
+def _complete_exit(session_db, identifier=None, trigger_source="IR_SENSOR", use_hardware=True):
     vehicle_number = identifier or IoTGatewayService.pending_exit_vehicle
     ticket = _find_active_ticket(session_db, vehicle_number)
     if not ticket:
@@ -613,7 +628,7 @@ def _complete_exit(session_db, identifier=None, trigger_source="IR_SENSOR"):
     exit_time = datetime.datetime.utcnow()
     ticket.exit_time = exit_time
     ticket.status = "COMPLETED"
-    ticket.duration_minutes = max(1, int((exit_time - ticket.entry_time).total_seconds() // 60))
+    ticket.duration_minutes = max(1, int((exit_time - utc_naive(ticket.entry_time)).total_seconds() // 60))
     slot = ticket.slot
     if slot:
         slot.status = "AVAILABLE"
@@ -628,9 +643,10 @@ def _complete_exit(session_db, identifier=None, trigger_source="IR_SENSOR"):
         notes=f"IR exit pass confirmed; released slot {slot.slot_number if slot else 'N/A'}"
     ))
     session_db.commit()
-    IoTGatewayService.pending_exit_vehicle = None
-    IoTGatewayService.set_ir_sensor("IR_EXIT", False)
-    IoTGatewayService.trigger_exit_barrier("CLOSED")
+    if use_hardware:
+        IoTGatewayService.pending_exit_vehicle = None
+        IoTGatewayService.set_ir_sensor("IR_EXIT", False)
+        IoTGatewayService.trigger_exit_barrier("CLOSED")
     return {
         "success": True,
         "message": f"Exit confirmed for {ticket.vehicle_number}; slot released",
@@ -702,7 +718,12 @@ def simulate_exit():
         if bypass_payment and ticket.payment_status != "PAID":
             ticket.payment_status = "EXEMPT"
             session.commit()
-        response, status = _authorize_exit(session, ticket.ticket_code, trigger_source)
+        response, status = _complete_exit(
+            session,
+            ticket.ticket_code,
+            trigger_source,
+            use_hardware=False
+        )
         return jsonify(response), status
 
     except Exception as e:

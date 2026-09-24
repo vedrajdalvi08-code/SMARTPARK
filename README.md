@@ -16,7 +16,7 @@ This project is architected for college demonstrations, technical vivas, and rea
    - **Hash Map Indexing**: Constant-time `O(1)` active session lookups by vehicle plate and digital QR token.
 4. **Software-First Demo Mode**:
    - Works **100% standalone** without requiring any physical ESP32 boards, cameras, or sensors.
-   - Built-in **Hardware Simulation Suite** in the Admin Portal to simulate vehicle arrivals, ANPR plate recognition, IR sensor triggers, barrier gate servos, and payment checkouts.
+   - Built-in **Software Testing Suite** in the Admin Portal for booked entry, walk-in allocation, payment, exit, history, and QR scanning. Physical hardware is deferred to the next semester.
 5. **Security & Best Practices**:
    - Salted password hashing (PBKDF2/SHA256).
    - SQL injection immunization via SQLAlchemy ORM parameter binding.
@@ -49,7 +49,7 @@ SMARTPARK/
 │   ├── index.html              # Public landing page & live bay availability map
 │   ├── booking.html            # Customer pre-booking portal & QR pass generator
 │   ├── payment.html            # Checkout, duration counter, dynamic pricing & payment gateway
-│   ├── admin.html              # Admin dashboard & interactive Hardware Simulator
+│   ├── admin.html              # Admin dashboard, QR scanner & software testing console
 │   ├── style.css               # Glassmorphism dark-theme design system
 │   └── app.js                  # Single-page client logic & real-time polling
 │
@@ -152,11 +152,21 @@ The app will be available at **`http://localhost:5000`**.
 ### 5. Deployment to Cloud Platforms
 | Platform | Config | Notes |
 | :--- | :--- | :--- |
-| **Vercel** | `vercel.json` in project root | Hosts frontend; proxy `/api/*` to your Flask backend URL |
+| **Vercel** | `vercel.json` in project root | Deploys the frontend and Flask API as one project; configure production environment variables in Vercel |
 | **Heroku / Render** | `backend/Procfile` | Set `BACKEND_URL` env var to your backend URL |
 | **Railway** | `backend/requirements.txt` + `Procfile` | Auto-detects Python/Flask app |
 
-### 6. Running with Docker (Optional)
+### 6. Deploying to Vercel
+1. Import the repository into Vercel with the project root as the deployment root.
+2. Add the variables from `backend/production.env.example` in **Project Settings > Environment Variables**. At minimum, set `FLASK_SECRET_KEY`, `ADMIN_PASSWORD`, `IOT_AUTH_TOKEN`, and `SUPABASE_DB_URL` (or `DATABASE_URL`).
+3. Deploy. `vercel.json` routes `/api/*` to the Flask serverless function and serves frontend pages from `frontend/`.
+4. Keep `AUTO_CREATE_SCHEMA=1`. On the first backend startup, SMARTPARK connects to Supabase, creates/verifies all SQLAlchemy tables, applies the booking compatibility migration, and seeds the initial slots, admin account, and settings automatically. Running `database/schema.sql` manually is optional for pre-provisioning.
+
+Vercel functions are stateless and can be restarted at any time, so production state must remain in Supabase. Do not use the local SQLite fallback in Vercel.
+
+`SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are server-side project configuration values. Automatic table creation specifically requires the PostgreSQL connection string in `SUPABASE_DB_URL`; Supabase API keys alone cannot run PostgreSQL DDL.
+
+### 7. Running with Docker (Optional)
 ```dockerfile
 FROM python:3.11-slim
 WORKDIR /app
@@ -173,7 +183,7 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "wsgi:app"]
 - **Always** change `FLASK_SECRET_KEY`, `ADMIN_PASSWORD`, `DB_PASSWORD`, and `IOT_AUTH_TOKEN` before production
 - **Never** commit `.env` files to version control (already excluded by `.gitignore`)
 - Use a strong, random `FLASK_SECRET_KEY` — generate with `python -c "import secrets; print(secrets.token_hex(32))"`
-- For Vercel frontend-only deployments, set `BACKEND_URL` to point to your running Flask backend
+- For a separate frontend/backend deployment, configure the frontend's `/api` proxy to point at the backend service and set CORS for the frontend origin.
 
 ---
 
@@ -184,20 +194,19 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "wsgi:app"]
 | **Live Availability** | `http://localhost:5000/index.html` | Real-time 2D parking lot visualizer & tariffs |
 | **Slot Booking** | `http://localhost:5000/booking.html` | Pre-book a slot & download instant QR entry pass |
 | **Pay & Checkout** | `http://localhost:5000/payment.html` | Lookup ticket, calculate dynamic fees, simulate UPI/Card payment |
-| **Admin & Simulator** | `http://localhost:5000/admin` | **Hardware Simulator**: trigger simulated ANPR arrivals, test IR sensors, animate barrier servos, and inspect gate audit logs |
+| **Admin Console** | `http://localhost:5000/admin` | Software-only dashboard for QR scanning, booked entry, walk-in allocation, payment, exit, active parking, and history |
 
 ---
 
 ## 💡 How to Demonstrate in a Viva / College Presentation
 
-1. **Demonstrate Software-First Simulation**:
+1. **Demonstrate the software-only flow**:
    - Open `/admin` and sign in.
-   - Click **"🎲 Random"** to generate a realistic vehicle number plate (e.g., `KA-01-MJ-5021`).
-   - Click **"⚡ Trigger IR Sensor & Vehicle Arrival"**.
-   - Show the examiner:
-     - The **Virtual Entry Barrier Servo** animates to 90° (OPEN) and resets automatically after 6 seconds.
-     - The **Min-Heap Algorithm** automatically assigned the nearest bay (e.g., `A-01` at 10m).
-     - The **Digital QR Pass Modal** pops up with turn-by-turn driving directions calculated via **Dijkstra's Algorithm**.
+   - Create a public booking from `/booking`, then keep its QR pass open.
+   - In Admin, open **QR Scanner**, click **Start Scanner**, or enter the token manually.
+   - Scan the QR to validate the booking, then click **Simulate Entry**.
+   - Settle payment from **Simulate Payment** or the payment page, then click **Simulate Exit**.
+   - Confirm the bay is available again and the completed session remains in **History**.
 2. **Demonstrate Real-Time Grid Updates**:
    - Open `index.html` in a second browser window.
    - Notice that slot `A-01` turned **RED (Occupied)** with the vehicle plate displayed in real-time.
@@ -205,9 +214,9 @@ CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "wsgi:app"]
    - Open `payment.html`, type `KA-01-MJ-5021` or click the payment link.
    - Point out the itemized fare breakdown: Base Rate + Additional Hours + Peak Surge (1.25x if between 9-11 AM or 5-8 PM) + GST.
    - Settle payment using the simulated **UPI QR** or **FASTag** button.
-4. **Demonstrate Exit Gate Release**:
-   - Return to `/admin`, select the vehicle in the Exit Gate simulator, and click **"🏁 Trigger Exit Gate"**.
-   - The exit barrier opens, the session is completed, and bay `A-01` turns back to **GREEN (Available)**.
+4. **Demonstrate software exit release**:
+   - After payment, open the Admin **Active Parking** section and click **Complete Paid Exit & Release Bay**.
+   - The session is completed and the allocated bay turns back to **GREEN (Available)**.
 5. **Demonstrate One-Click Reset**:
    - Click **"🔄 Reset Demo"** to restore all slots to available for the next reviewer.
 

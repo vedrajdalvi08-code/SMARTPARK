@@ -1,13 +1,10 @@
 /**
  * SMARTPARK - Frontend Client Application
  * Handles API communication, interactive slot visualization,
- * dynamic pricing calculations, simulated payment gateway, and hardware simulator.
+ * dynamic pricing calculations, simulated payment gateway, and admin testing tools.
  */
 
-// Auto-detect API base URL (works seamlessly when served by Flask or static server)
-// Use the same-origin /api proxy in production (Vercel -> Flask backend).
-// When running Flask directly on port 5000, /api also works without a proxy.
-// When an HTML file is opened directly from disk, fall back to localhost.
+// Use same-origin API routes in Flask/Vercel; support local HTML file testing too.
 const API_BASE = window.location.protocol === "file:"
   ? "http://127.0.0.1:5000/api"
   : "/api";
@@ -83,7 +80,7 @@ async function loadDemoModeSetting() {
   const toggle = document.getElementById("demoModeToggle");
   const status = document.getElementById("demoModeStatus");
   if (toggle) toggle.checked = result.data.demo_mode;
-  if (status) status.innerText = result.data.demo_mode ? "Virtual hardware simulation is enabled" : "Hardware-only mode is enabled";
+  if (status) status.innerText = result.data.demo_mode ? "Software testing mode is enabled" : "Software testing mode is disabled";
 }
 
 async function setDemoMode(enabled) {
@@ -93,7 +90,7 @@ async function setDemoMode(enabled) {
   });
   const status = document.getElementById("demoModeStatus");
   if (result.ok && result.data.success) {
-    if (status) status.innerText = enabled ? "Virtual hardware simulation is enabled" : "Hardware-only mode is enabled";
+    if (status) status.innerText = enabled ? "Software testing mode is enabled" : "Software testing mode is disabled";
     showToast("Simulation mode updated.", "success");
   } else {
     showToast(result.data.error || "Could not update simulation mode.", "error");
@@ -243,16 +240,19 @@ function getRandomDemoPlate() {
 async function triggerSimulatedEntry() {
   const plateInput = document.getElementById("simVehicleNumber");
   const typeSelect = document.getElementById("simVehicleType");
+  const bookingInput = document.getElementById("simBookingToken");
   const vehicleNumber = plateInput ? plateInput.value.trim() : "";
   const vehicleType = typeSelect ? typeSelect.value : "COMPACT";
+  const bookingToken = bookingInput ? bookingInput.value.trim() : "";
 
   const payload = {
     vehicle_number: vehicleNumber || undefined,
     vehicle_type: vehicleType,
+    booking_id: bookingToken || undefined,
     trigger_source: "MANUAL_SIM"
   };
 
-  showToast("Detecting vehicle at Entry Gate IR Sensor...", "info");
+  showToast(bookingToken ? "Validating booking for software entry..." : "Allocating a software walk-in slot...", "info");
 
   const res = await fetchAPI("/entry/simulate", {
     method: "POST",
@@ -261,8 +261,6 @@ async function triggerSimulatedEntry() {
 
   if (res.ok && res.data.success) {
     showToast(res.data.message, "success");
-    // Animate Barrier Gate boom
-    animateEntryBarrier();
     // Show Pass Modal
     showTicketPassModal(res.data.ticket, res.data.allocated_slot, res.data.navigation);
     // Reload Grid
@@ -271,6 +269,12 @@ async function triggerSimulatedEntry() {
   } else {
     showToast(res.data.error || "Entry failed", "error");
   }
+}
+
+async function triggerWalkInEntry() {
+  const bookingInput = document.getElementById("simBookingToken");
+  if (bookingInput) bookingInput.value = "";
+  await triggerSimulatedEntry();
 }
 
 function animateEntryBarrier() {
@@ -316,7 +320,6 @@ async function triggerSimulatedExit() {
 
   if (res.ok && res.data.success) {
     showToast(res.data.message, "success");
-    animateExitBarrier();
     loadSystemStatusAndGrid();
     loadAnalytics();
   } else if (res.status === 402) {
@@ -328,6 +331,148 @@ async function triggerSimulatedExit() {
   } else {
     showToast(res.data.error || "Exit check failed", "error");
   }
+}
+
+async function simulateAdminPayment() {
+  const input = document.getElementById("simPaymentToken");
+  const token = input ? input.value.trim() : "";
+  if (!token) {
+    showToast("Enter a booking or session token first.", "error");
+    return;
+  }
+  await lookupTicketForPayment(token);
+  if (currentActiveTicket && currentActiveTicket.payment_status !== "PAID") {
+    await executeSimulatedPayment("UPI_QR");
+  }
+}
+
+let adminQrStream = null;
+let adminQrScanTimer = null;
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>'"]/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+  }[character]));
+}
+
+async function scanAdminQrToken(token) {
+  const cleanedToken = String(token || "").trim();
+  const resultBox = document.getElementById("qrScanResult");
+  if (!cleanedToken) {
+    showToast("Enter or scan a booking QR token.", "error");
+    return;
+  }
+
+  const result = await fetchAPI("/admin/qr/scan", {
+    method: "POST",
+    body: JSON.stringify({ token: cleanedToken })
+  });
+  if (!result.ok || !result.data.success) {
+    if (resultBox) resultBox.innerHTML = `<div class="qr-scan-error">${escapeHtml(result.data.error || "QR validation failed")}</div>`;
+    return;
+  }
+
+  const booking = result.data.booking;
+  const paymentAction = booking.payment_status === "PENDING"
+    ? `<button class="btn btn-secondary" onclick="openAdminPayment('${escapeHtml(booking.booking_id)}')">Open Payment</button>`
+    : "";
+  const entryAction = booking.entry_status === "NOT_ENTERED"
+    ? `<button class="btn btn-primary" onclick="entryFromScannedQr('${escapeHtml(booking.booking_id)}')">Simulate Entry</button>`
+    : "";
+  const exitAction = booking.entry_status === "ENTERED" && booking.payment_status === "PAID"
+    ? `<button class="btn btn-success" onclick="exitFromScannedQr('${escapeHtml(booking.booking_id)}')">Simulate Exit</button>`
+    : "";
+  const userName = booking.user ? (booking.user.full_name || booking.user.username) : "Guest booking";
+  if (resultBox) {
+    resultBox.innerHTML = `
+      <div class="qr-scan-success">QR token validated</div>
+      <div class="qr-details-grid">
+        <span>Booking ID</span><strong>${escapeHtml(booking.booking_id)}</strong>
+        <span>Vehicle</span><strong>${escapeHtml(booking.vehicle_number)}</strong>
+        <span>Type</span><strong>${escapeHtml(booking.vehicle_type)}</strong>
+        <span>User</span><strong>${escapeHtml(userName)}</strong>
+        <span>Slot</span><strong>${escapeHtml(booking.slot?.slot_number || "Unassigned")}</strong>
+        <span>Booking status</span><strong>${escapeHtml(booking.booking_status)}</strong>
+        <span>Entry status</span><strong>${escapeHtml(booking.entry_status)}</strong>
+        <span>Payment status</span><strong>${escapeHtml(booking.payment_status)}</strong>
+        ${booking.entry_time ? `<span>Entry time</span><strong>${escapeHtml(booking.entry_time)}</strong>` : ""}
+      </div>
+      <div class="qr-action-row">${entryAction}${paymentAction}${exitAction}</div>
+    `;
+  }
+  showToast("QR token validated.", "success");
+}
+
+function entryFromScannedQr(token) {
+  const input = document.getElementById("simBookingToken");
+  if (input) input.value = token;
+  triggerSimulatedEntry();
+}
+
+function openAdminPayment(token) {
+  window.location.href = `payment.html?ticket=${encodeURIComponent(token)}`;
+}
+
+async function exitFromScannedQr(token) {
+  const result = await fetchAPI("/exit/simulate", {
+    method: "POST",
+    body: JSON.stringify({ ticket_code: token, trigger_source: "MANUAL_SIM" })
+  });
+  if (result.ok && result.data.success) {
+    showToast(result.data.message, "success");
+    loadSystemStatusAndGrid();
+    loadAnalytics();
+    scanAdminQrToken(token);
+  } else {
+    showToast(result.data.error || "Exit failed", "error");
+  }
+}
+
+async function startAdminQrScanner() {
+  const video = document.getElementById("adminQrVideo");
+  if (!video) return;
+  if (!window.isSecureContext && window.location.hostname !== "localhost") {
+    showToast("Camera scanning requires HTTPS. Use manual token entry on this connection.", "error");
+    return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    showToast("This browser does not provide QR detection. Use manual token entry.", "info");
+    return;
+  }
+  try {
+    adminQrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    video.srcObject = adminQrStream;
+    await video.play();
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    const scanFrame = async () => {
+      if (!adminQrStream) return;
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length && codes[0].rawValue) {
+          stopAdminQrScanner();
+          const manualInput = document.getElementById("adminQrTokenInput");
+          if (manualInput) manualInput.value = codes[0].rawValue;
+          await scanAdminQrToken(codes[0].rawValue);
+          return;
+        }
+      } catch (error) {
+        console.debug("QR frame scan skipped", error);
+      }
+      adminQrScanTimer = window.setTimeout(scanFrame, 250);
+    };
+    scanFrame();
+  } catch (error) {
+    showToast("Camera permission was unavailable. Use manual token entry.", "error");
+  }
+}
+
+function stopAdminQrScanner() {
+  if (adminQrScanTimer) window.clearTimeout(adminQrScanTimer);
+  adminQrScanTimer = null;
+  if (adminQrStream) adminQrStream.getTracks().forEach(track => track.stop());
+  adminQrStream = null;
+  const video = document.getElementById("adminQrVideo");
+  if (video) video.srcObject = null;
 }
 
 async function resetDemoSystem() {
@@ -392,8 +537,8 @@ function showTicketPassModal(ticket, slot, nav) {
   const navContainer = document.getElementById("modalNavInstructions");
 
   if (qrImg) {
-    // Generate QR code pointing to payment / ticket URL
-    const qrData = encodeURIComponent(`SMARTPARK:${ticket.ticket_code}:${ticket.vehicle_number}`);
+    // QR contains only the opaque booking/session token.
+    const qrData = encodeURIComponent(`SMARTPARK:${ticket.ticket_code}`);
     qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${qrData}`;
   }
   if (codeEl) codeEl.innerText = ticket.ticket_code;

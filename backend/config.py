@@ -48,6 +48,11 @@ class Config:
         os.getenv("SECRET_KEY", "change-this-flask-secret-key")
     )
 
+    # Supabase project credentials are server-side configuration only.
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
     ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "CHANGE_ME")
 
@@ -60,6 +65,7 @@ class Config:
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
+    AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "1") == "1"
 
     RATES = {
         "TWO_WHEELER": {

@@ -144,6 +144,15 @@ class ParkingFacilityGraph:
 facility_graph = ParkingFacilityGraph()
 
 
+def utc_naive(value):
+    """Normalize database or request timestamps to UTC without tzinfo."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return value
+
+
 class SlotAllocationService:
     """
     Min-Heap Priority Queue for allocating the optimal nearest parking slot.
@@ -370,8 +379,10 @@ class BillingService:
 
     @classmethod
     def calculate_bill(cls, entry_time, exit_time=None, vehicle_type="COMPACT"):
+        entry_time = utc_naive(entry_time)
         if exit_time is None:
             exit_time = datetime.datetime.utcnow()
+        exit_time = utc_naive(exit_time)
 
         # Compute duration
         delta = exit_time - entry_time

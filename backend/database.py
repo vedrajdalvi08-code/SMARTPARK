@@ -266,7 +266,8 @@ def init_db(app=None):
         engine = create_engine(
             database_url,
             pool_pre_ping=True,
-            pool_recycle=300
+            pool_recycle=300,
+            connect_args={"connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "10"))}
         )
 
         with engine.connect() as conn:
@@ -284,8 +285,12 @@ def init_db(app=None):
         sessionmaker(autocommit=False, autoflush=False, bind=engine)
     )
 
-    # SQLAlchemy creates/updates the initial application schema.
-    Base.metadata.create_all(bind=engine)
+    if Config.AUTO_CREATE_SCHEMA:
+        logger.info("Creating or verifying SMARTPARK tables in Supabase PostgreSQL...")
+        Base.metadata.create_all(bind=engine)
+        logger.info("SMARTPARK database schema is ready.")
+    else:
+        logger.info("Automatic schema creation is disabled by AUTO_CREATE_SCHEMA=0.")
 
     # Keep older deployments compatible with the booking_time field.
     inspector = __import__("sqlalchemy").inspect(engine)
@@ -301,7 +306,11 @@ def init_db(app=None):
                     "ADD COLUMN booking_time TIMESTAMP NULL"
                 ))
 
-    seed_initial_data()
+    try:
+        seed_initial_data()
+    except Exception:
+        logger.exception("Supabase schema/data initialization failed.")
+        raise
     return engine
 
 
@@ -406,5 +415,7 @@ def seed_initial_data():
     except Exception as e:
         session.rollback()
         logger.error(f"Error during database seed: {e}")
+        if os.getenv("FLASK_ENV", "development").lower() == "production":
+            raise
     finally:
         session.close()
