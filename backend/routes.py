@@ -76,6 +76,14 @@ def admin_me():
     return jsonify({"authenticated": True, "user": session["admin_user"]})
 
 
+def normalize_token(raw_token):
+    """Clean up and extract token string from raw user input / QR scan."""
+    token = str(raw_token or "").strip()
+    if token.upper().startswith("SMARTPARK:"):
+        token = token.split(":", 1)[1].strip()
+    return token.upper()
+
+
 def _qr_ticket_details(ticket):
     """Return scanner-safe booking/session data without exposing secrets."""
     slot = ticket.slot
@@ -100,7 +108,7 @@ def _qr_ticket_details(ticket):
         "booking_time": ticket.booking_time.isoformat() if ticket.booking_time else None,
         "booking_status": ticket.status,
         "entry_status": entry_status,
-        "entry_time": ticket.entry_time.isoformat() if entry_status != "NOT_ENTERED" else None,
+        "entry_time": ticket.entry_time.isoformat() if entry_status != "NOT_ENTERED" and ticket.entry_time else None,
         "exit_time": ticket.exit_time.isoformat() if ticket.exit_time else None,
         "payment_status": ticket.payment_status,
         "ticket": ticket.to_dict()
@@ -114,10 +122,7 @@ def scan_admin_qr():
     session_db = database.SessionLocal()
     try:
         data = request.get_json(silent=True) or {}
-        raw_token = str(data.get("token") or data.get("qr_token") or "").strip()
-        if raw_token.upper().startswith("SMARTPARK:"):
-            raw_token = raw_token.split(":", 1)[1].strip()
-        token = raw_token.upper()
+        token = normalize_token(data.get("token") or data.get("qr_token"))
         if not token or len(token) > 64:
             return jsonify({"success": False, "error": "A valid booking QR token is required."}), 400
 
@@ -239,6 +244,7 @@ def reserve_slot():
         slot_number = data.get("slot_number")
         booking_time_value = data.get("booking_time")
 
+        now_utc = datetime.datetime.utcnow()
         if booking_time_value:
             try:
                 booking_time = datetime.datetime.fromisoformat(str(booking_time_value).replace("Z", "+00:00"))
@@ -246,10 +252,10 @@ def reserve_slot():
                     booking_time = booking_time.astimezone(datetime.timezone.utc).replace(tzinfo=None)
             except ValueError:
                 return jsonify({"success": False, "error": "Booking time must be a valid date and time"}), 400
-            if booking_time < datetime.datetime.utcnow():
+            if booking_time < now_utc - datetime.timedelta(minutes=15):
                 return jsonify({"success": False, "error": "Booking time must be in the future"}), 400
         else:
-            booking_time = datetime.datetime.utcnow()
+            booking_time = now_utc
 
         if not vehicle_number:
             return jsonify({"success": False, "error": "Vehicle number is required for booking"}), 400
@@ -332,8 +338,9 @@ def _autonomous_entry(data, session, use_hardware=True):
     vehicle_number = anpr_result["plate_number"]
 
     if booking_token:
+        clean_token = normalize_token(booking_token)
         active_ticket = session.query(Ticket).filter_by(
-            ticket_code=str(booking_token).strip().upper(),
+            ticket_code=clean_token,
             status="ACTIVE"
         ).first()
         if not active_ticket:
@@ -349,7 +356,8 @@ def _autonomous_entry(data, session, use_hardware=True):
                 "entry_authorized": False
             }, 409
         booking_time = utc_naive(active_ticket.booking_time)
-        if booking_time and booking_time > datetime.datetime.utcnow():
+        now_utc = datetime.datetime.utcnow()
+        if booking_time and booking_time > now_utc + datetime.timedelta(minutes=15):
             return None, {
                 "success": False,
                 "error": "This booking is not active yet. Entry is allowed from the scheduled time.",
@@ -357,7 +365,7 @@ def _autonomous_entry(data, session, use_hardware=True):
                 "booking_time": booking_time.isoformat()
             }, 409
         active_ticket_slot = active_ticket.slot
-        if not active_ticket_slot or active_ticket_slot.status != "RESERVED":
+        if not active_ticket_slot or active_ticket_slot.status not in ("RESERVED", "AVAILABLE"):
             return None, {
                 "success": False,
                 "error": "This booking has already entered or its reserved slot is unavailable.",
@@ -372,7 +380,7 @@ def _autonomous_entry(data, session, use_hardware=True):
         ).first()
 
     if active_ticket:
-        if active_ticket.slot.status != "RESERVED":
+        if active_ticket.slot.status == "OCCUPIED":
             return None, {
                 "success": False,
                 "error": f"Vehicle {vehicle_number} is already inside at slot {active_ticket.slot.slot_number}.",
@@ -489,7 +497,7 @@ def get_ticket_details(identifier):
     """
     session = database.SessionLocal()
     try:
-        clean_id = identifier.strip().upper()
+        clean_id = normalize_token(identifier)
         ticket = session.query(Ticket).filter(
             (Ticket.ticket_code == clean_id) | (Ticket.vehicle_number == clean_id),
             Ticket.status == "ACTIVE"
@@ -517,12 +525,13 @@ def process_payment():
     session = database.SessionLocal()
     try:
         data = request.get_json() or {}
-        ticket_code = data.get("ticket_code")
+        raw_code = data.get("ticket_code")
         payment_method = data.get("payment_method", "UPI_QR").upper()
 
-        if not ticket_code:
+        if not raw_code:
             return jsonify({"success": False, "error": "ticket_code is required"}), 400
 
+        ticket_code = normalize_token(raw_code)
         ticket = session.query(Ticket).filter_by(ticket_code=ticket_code, status="ACTIVE").first()
         if not ticket:
             return jsonify({"success": False, "error": "Active ticket not found"}), 404
@@ -561,7 +570,7 @@ def process_payment():
 
 
 def _find_active_ticket(session_db, identifier):
-    clean_id = str(identifier or "").strip().upper()
+    clean_id = normalize_token(identifier)
     if not clean_id:
         return None
     return session_db.query(Ticket).filter(
@@ -928,8 +937,7 @@ def reset_demo():
             "exit_time": datetime.datetime.utcnow()
         })
         # Reset hardware barrier
-        IoTGatewayService.trigger_entry_barrier("CLOSED")
-        IoTGatewayService.trigger_exit_barrier("CLOSED")
+        IoTGatewayService.reset_all()
 
         session.commit()
         return jsonify({"success": True, "message": "Demo state reset! All 20 slots are now AVAILABLE."})
