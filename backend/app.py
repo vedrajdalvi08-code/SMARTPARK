@@ -30,7 +30,7 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 
 def create_app():
     """Application factory for SMARTPARK."""
-    app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
+    app = Flask(__name__, static_folder=None)
     app.config.from_object(Config)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -50,6 +50,11 @@ def create_app():
 
     # Register API Blueprints
     app.register_blueprint(api)
+
+    # Error Handlers
+    @app.errorhandler(404)
+    def handle_not_found(e):
+        return jsonify({"success": False, "error": "Endpoint or resource not found"}), 404
 
     # --------------------------------------------------------
     # Frontend Routes (Single-Origin Serving)
@@ -79,12 +84,11 @@ def create_app():
         target = FRONTEND_DIR / filename
         if target.exists() and target.is_file():
             return send_from_directory(str(FRONTEND_DIR), filename)
+        # Try appending .html (e.g. /booking -> booking.html)
+        html_target = FRONTEND_DIR / f"{filename}.html"
+        if html_target.exists() and html_target.is_file():
+            return send_from_directory(str(FRONTEND_DIR), f"{filename}.html")
         return send_from_directory(str(FRONTEND_DIR), "index.html")
-
-    # Error Handlers
-    @app.errorhandler(404)
-    def handle_not_found(e):
-        return jsonify({"success": False, "error": "Endpoint or resource not found"}), 404
 
     @app.errorhandler(500)
     def handle_server_error(e):

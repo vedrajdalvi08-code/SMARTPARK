@@ -119,7 +119,15 @@ async function fetchAPI(endpoint, options = {}) {
       headers: { ...defaultHeaders, ...(options.headers || {}) }
     });
 
-    const data = await response.json();
+    let data;
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      data = { success: response.ok, message: text };
+    }
+
     return { ok: response.ok, status: response.status, data };
   } catch (error) {
     console.error(`API Call failed on ${endpoint}:`, error);

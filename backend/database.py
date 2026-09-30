@@ -262,18 +262,22 @@ def init_db(app=None):
     database_url = Config.SQLALCHEMY_DATABASE_URI
 
     try:
-        logger.info("Connecting to Supabase PostgreSQL database...")
+        logger.info("Connecting to database...")
+        connect_args = {}
+        if database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+            connect_args["connect_timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+
         engine = create_engine(
             database_url,
             pool_pre_ping=True,
             pool_recycle=300,
-            connect_args={"connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "10"))}
+            connect_args=connect_args
         )
 
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
 
-        logger.info("Successfully connected to Supabase PostgreSQL.")
+        logger.info("Successfully connected to database.")
     except Exception as exc:
         logger.error("Supabase PostgreSQL connection failed: %s", exc)
         raise RuntimeError(

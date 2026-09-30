@@ -166,6 +166,7 @@ class SlotAllocationService:
     """
     @staticmethod
     def find_and_assign_slot(session, vehicle_type, vehicle_number=None):
+        vehicle_type = (vehicle_type or "COMPACT").upper()
         # Query all available slots
         available_slots = session.query(ParkingSlot).filter(
             ParkingSlot.status == "AVAILABLE"
@@ -266,8 +267,8 @@ class ANPRService:
             return ""
         # Remove special characters except hyphen
         cleaned = re.sub(r"[^A-Za-z0-9]", "", text_input).upper()
-        # Format standard e.g. KA01MJ5021 -> KA-01-MJ-5021
-        if len(cleaned) == 10:
+        # Format standard Indian vehicle plate e.g. KA01MJ5021 -> KA-01-MJ-5021
+        if len(cleaned) == 10 and re.match(r"^[A-Z]{2}\d{2}[A-Z]{2}\d{4}$", cleaned):
             return f"{cleaned[0:2]}-{cleaned[2:4]}-{cleaned[4:6]}-{cleaned[6:10]}"
         return cleaned
 
@@ -379,6 +380,7 @@ class BillingService:
 
     @classmethod
     def calculate_bill(cls, entry_time, exit_time=None, vehicle_type="COMPACT"):
+        vehicle_type = (vehicle_type or "COMPACT").upper()
         entry_time = utc_naive(entry_time)
         if exit_time is None:
             exit_time = datetime.datetime.utcnow()
@@ -491,3 +493,17 @@ class IoTGatewayService:
 
         logger.info(f"[HARDWARE SIMULATOR] {sensor_type} changed to: {'DETECTED' if is_detected else 'CLEAR'}")
         return cls.hardware_state
+
+    @classmethod
+    def reset_all(cls):
+        cls.pending_exit_vehicle = None
+        cls.hardware_state = {
+            "entry_barrier": {"status": "CLOSED", "angle": 0, "last_action": None},
+            "exit_barrier": {"status": "CLOSED", "angle": 0, "last_action": None},
+            "entry_ir_sensor": {"detected": False, "voltage": 3.3},
+            "exit_ir_sensor": {"detected": False, "voltage": 3.3},
+            "slot_ir_sensors": {
+                "A-01": {"detected": False},
+                "B-01": {"detected": False}
+            }
+        }
