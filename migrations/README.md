@@ -4,6 +4,14 @@ Production startup does not run `create_all()` or destructive DDL. Apply the
 versioned SQL files below using a reviewed Supabase/PostgreSQL migration
 workflow, then deploy the application with `AUTO_CREATE_SCHEMA=0`.
 
+For a brand-new, dedicated PostgreSQL database that has been verified empty,
+run `database/schema.sql` once to create the base schema, then apply migrations
+`000` through `003` in order. `schema.sql` contains `DROP` statements and must
+never be run against an existing installation. For an existing installation,
+back up the database and apply only unapplied migrations after staging
+verification. These numbered migration files are upgrades; they do not create
+all base tables on their own.
+
 Before applying a migration:
 
 1. Take a Supabase backup and verify the target database and schema.

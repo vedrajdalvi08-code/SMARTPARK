@@ -159,12 +159,24 @@ The app will be available at **`http://localhost:5000`**.
 | **Railway** | `backend/requirements.txt` + `Procfile` | Auto-detects Python/Flask app |
 
 ### 6. Deploying to Vercel
-1. Import the repository into Vercel with the project root as the deployment root.
-2. Add the variables from `backend/production.env.example` in **Project Settings > Environment Variables**. At minimum, set `FLASK_SECRET_KEY`, `ADMIN_PASSWORD`, and `SUPABASE_DB_URL` (or `DATABASE_URL`).
-3. Apply the reviewed SQL files in `migrations/` to staging and then production before deploying.
-4. Set `AUTO_CREATE_SCHEMA=0`. Production startup validates connectivity only; it does not create or alter tables.
+1. Import the repository into Vercel with the repository root as the project root. Keep the default build and output settings; `.python-version` pins the function runtime to Python 3.12, and `vercel.json` routes API and authenticated pages through the Flask function and serves static frontend assets separately.
+2. Prepare the Supabase schema:
+   - For a brand-new, dedicated database that has been verified empty, run `database/schema.sql` once to create the base tables and types, then apply `migrations/000_migration_tracking.sql` through `migrations/003_retire_first_deck.sql` in order.
+   - For an existing SMARTPARK database, take a backup, verify the target, test pending migrations on staging, and apply only unapplied files in `migrations/` in order. Never run `database/schema.sql` against an existing database.
+3. Add the production variables in **Project Settings > Environment Variables** for Production and Preview as appropriate. Required:
+   - `FLASK_ENV=production`
+   - `FLASK_DEBUG=0`
+   - `AUTO_CREATE_SCHEMA=0`
+   - `SESSION_COOKIE_SECURE=1`
+   - `FLASK_SECRET_KEY` set to a unique random secret
+   - `ADMIN_USERNAME` and a new, strong `ADMIN_PASSWORD`
+   - `SUPABASE_DB_URL` set to the Supabase PostgreSQL connection string (or use `DATABASE_URL` instead)
+4. Set `CORS_ORIGINS` to the deployed site origin if browser clients will call the API from another origin. Same-origin Vercel frontend requests do not require cross-origin access.
+5. Deploy a Preview first. Verify `/`, `/portals`, `/parking`, customer/admin login, `/api/status`, and a database-backed read before promoting to Production. Confirm the status response has the expected facility coordinates and parking capacity.
 
-Vercel functions are stateless and can be restarted at any time, so production state must remain in Supabase. Do not use the local SQLite fallback in Vercel.
+Vercel functions are stateless and can be restarted at any time, so production state must remain in PostgreSQL. Do not use the local SQLite fallback in Vercel. Schema changes are not applied at startup; use the ordered migrations and verify they are recorded in `smartpark_migrations`. The migration for retiring existing deck slots is also an explicit database operation and is not run by deployment.
+
+Do not reuse local development credentials as deployment secrets. If a credential has been exposed in an editor, terminal, or chat, rotate it before deployment. Never add `.env` files or database URLs to Vercel source/build settings; enter secrets only in Vercel's encrypted Environment Variables settings.
 
 ### PostgreSQL setup and migration safety
 

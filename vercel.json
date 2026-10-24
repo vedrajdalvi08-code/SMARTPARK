@@ -18,7 +18,19 @@
     },
     {
       "src": "/",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/parking",
       "dest": "/frontend/index.html"
+    },
+    {
+      "src": "/portal",
+      "dest": "/frontend/portals.html"
+    },
+    {
+      "src": "/portals",
+      "dest": "/frontend/portals.html"
     },
     {
       "src": "/admin/login",
@@ -50,15 +62,19 @@
     },
     {
       "src": "/customer",
-      "dest": "/frontend/customer.html"
+      "dest": "/api/index.py"
     },
     {
       "src": "/customer/login",
-      "dest": "/frontend/customer-login.html"
+      "dest": "/api/index.py"
     },
     {
       "src": "/customer/register",
-      "dest": "/frontend/customer-register.html"
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/customer.html",
+      "dest": "/api/index.py"
     },
     {
       "src": "/(.*)",
