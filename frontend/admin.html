@@ -1,337 +1,58 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Dashboard & Software Testing | SMARTPARK</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operations dashboard | SMARTPARK</title>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css?v=admin-reserved-editor">
 </head>
-<body>
-
-  <!-- Navigation Bar -->
-  <nav class="navbar admin-navbar">
-    <a href="index.html" class="nav-brand">
-      <div class="brand-icon">P</div>
-      <span>SMARTPARK</span>
-    </a>
-    <ul class="nav-links">
-      <li><a href="index.html">Live Availability</a></li>
-      <li><a href="booking.html">Book a Spot</a></li>
-      <li><a href="payment.html">Pay & Exit</a></li>
-      <li><a href="/admin#dashboard" class="active">Dashboard</a></li>
-      <li><a href="#parking">Parking</a></li>
-      <li><a href="#simEntry">Bookings</a></li>
-      <li><a href="#simExit">Active Parking</a></li>
-      <li><a href="#simPayment">Payments</a></li>
-      <li><a href="#activityLog">History</a></li>
-      <li><a href="#testing">Testing</a></li>
-      <li><a href="#qr-scanner">QR Scanner</a></li>
-      <li><a href="#settings">Settings</a></li>
-      <li><span class="badge-demo">Demo Mode Active</span></li>
-      <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
-    </ul>
+<body class="admin-login-page">
+  <nav class="admin-shell-nav" aria-label="Operations navigation">
+    <a href="/admin" class="admin-brand"><span class="admin-brand-mark">SP</span><span><strong>SMARTPARK</strong><small>Operations</small></span></a>
+    <ul class="admin-nav-links"><li><a class="active" href="/admin">Overview</a></li><li><a href="/admin/scanner">QR scanner</a></li><li><a href="#parking">Parking slots</a></li><li><a href="#activityLog">Audit history</a></li><li><a href="/portals">Other portal</a></li></ul>
+    <div class="admin-nav-actions"><span class="admin-status-dot">● Live data</span><button class="admin-logout" type="button" onclick="adminLogout()">Log out</button></div>
   </nav>
-
-  <div class="container" style="max-width: 1300px;">
-    <!-- Dashboard Top Bar -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
-      <div>
-        <h1 id="dashboard" style="font-size: 1.85rem; font-weight: 800;">Admin Console & Software Testing</h1>
-        <p style="color: var(--text-muted); font-size: 0.9rem;">
-          Manage parking, bookings, active sessions, payments, history, and software-only entry and exit testing.
-        </p>
-      </div>
-      <div>
-        <button class="btn btn-danger" onclick="resetDemoSystem()">
-          🔄 Reset Demo (Clear All Slots)
-        </button>
-        <button class="btn btn-secondary" onclick="adminLogout()">Log out</button>
-      </div>
-    </div>
-
-    <div id="settings" class="settings-strip">
-      <div>
-        <strong>Simulation mode</strong>
-        <span id="demoModeStatus">Loading setting...</span>
-      </div>
-      <label class="switch-control">
-        <input type="checkbox" id="demoModeToggle" onchange="setDemoMode(this.checked)">
-        <span class="switch-slider"></span>
-      </label>
-    </div>
-
-    <!-- Live Metrics Overview -->
-    <div class="stats-grid" style="margin-bottom: 1.5rem;">
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-label">Facility Occupancy</span>
-          <span class="stat-icon">📊</span>
-        </div>
-        <div class="stat-value" id="adminOccupancyRate">0%</div>
-        <div class="stat-desc">Live capacity ratio</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-label">Vehicles Handled Today</span>
-          <span class="stat-icon">🚘</span>
-        </div>
-        <div class="stat-value" id="adminVehiclesToday">0</div>
-        <div class="stat-desc">Total arrivals logged</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-label">Simulated Revenue</span>
-          <span class="stat-icon">💰</span>
-        </div>
-        <div class="stat-value" id="adminRevenueToday" style="color: var(--status-available);">₹0.00</div>
-        <div class="stat-desc">Settled parking fees</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-label">System Mode</span>
-          <span class="stat-icon">▣</span>
-        </div>
-        <div class="stat-value" style="font-size: 1.35rem; color: #38bdf8;">Software Only</div>
-        <div class="stat-desc">Supabase-backed testing</div>
-      </div>
-    </div>
-
-    <!-- Admin-only software testing tools -->
-    <div id="testing" class="sim-box" style="margin-bottom: 1.5rem;">
-      <div class="sim-header">
-        <div class="sim-title"><span>🧪</span> Testing</div>
-        <span class="badge-demo">Software-only mode</span>
-      </div>
-      <p style="color: var(--text-muted); margin-bottom: 1rem;">Use a booking token for scheduled entry, or use Walk-in for an unbooked vehicle. No ESP32, sensor, servo, or physical gate is required.</p>
-      <div class="testing-shortcuts">
-        <a class="btn btn-secondary" href="#simEntry">Simulate Entry</a>
-        <a class="btn btn-secondary" href="#simWalkIn">Walk-in</a>
-        <a class="btn btn-secondary" href="#simExit">Simulate Exit</a>
-        <a class="btn btn-secondary" href="#simPayment">Simulate Payment</a>
-        <a class="btn btn-secondary" href="#qr-scanner">QR Scanner</a>
-      </div>
-    </div>
-
-    <div id="qr-scanner" class="sim-box" style="margin-bottom: 1.5rem;">
-      <div class="sim-header">
-        <div class="sim-title"><span>▣</span> Admin QR Scanner</div>
-        <span class="badge-demo">Admin authentication required</span>
-      </div>
-      <p style="color: var(--text-muted); margin-bottom: 1rem;">Scan the secure booking token generated by the public booking pass, or enter it manually.</p>
-      <div class="qr-scanner-layout">
-        <div>
-          <video id="adminQrVideo" class="qr-camera-preview" playsinline muted></video>
-          <div class="testing-shortcuts" style="margin-top: 0.75rem;">
-            <button class="btn btn-primary" type="button" onclick="startAdminQrScanner()">Start Scanner</button>
-            <button class="btn btn-secondary" type="button" onclick="stopAdminQrScanner()">Stop Scanner</button>
-          </div>
-        </div>
-        <div>
-          <label class="form-label" for="adminQrTokenInput">Manual token entry</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input id="adminQrTokenInput" class="form-input" placeholder="SMARTPARK:SP-...">
-            <button class="btn btn-primary" type="button" onclick="scanAdminQrToken(document.getElementById('adminQrTokenInput').value)">Scan</button>
-          </div>
-          <div id="qrScanResult" class="qr-scan-result" aria-live="polite">No QR token scanned yet.</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Main software testing controls -->
-    <div class="sim-grid">
-      
-      <!-- ============================================== -->
-      <!-- 1. ENTRY GATE SIMULATOR -->
-      <!-- ============================================== -->
-      <div class="sim-box">
-        <div class="sim-header">
-          <div id="simEntry" class="sim-title">
-            <span>↗</span> Simulate Entry
-          </div>
-          <span class="badge-demo">Software workflow</span>
-        </div>
-
-        <!-- Virtual License Plate Preview -->
-        <div style="text-align: center;">
-          <div class="plate-preview-box">
-            <span class="plate-flag">IND</span>
-            <span id="simPlatePreview">KA-01-MJ-5021</span>
-          </div>
-        </div>
-
-        <!-- Simulator Input Controls -->
-        <div class="form-group">
-          <label class="form-label" for="simVehicleNumber">Vehicle Number Plate</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input type="text" id="simVehicleNumber" class="form-input" value="KA-01-MJ-5021" style="font-family: monospace; text-transform: uppercase;" oninput="document.getElementById('simPlatePreview').innerText = this.value || 'ENTER PLATE'">
-            <button type="button" class="btn btn-secondary" onclick="getRandomDemoPlate()">
-              🎲 Random
-            </button>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="simVehicleType">Vehicle Classification</label>
-          <select id="simVehicleType" class="form-select">
-            <option value="COMPACT">Compact / Hatchback / Sedan</option>
-            <option value="SUV">SUV / Large Vehicle</option>
-            <option value="TWO_WHEELER">Two-Wheeler / Bike</option>
-            <option value="EV">Electric Vehicle (EV Bay)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="simBookingToken">Booking ID / QR Token (optional)</label>
-          <input type="text" id="simBookingToken" class="form-input" placeholder="SP-######## or SMARTPARK:SP-########">
-          <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">Use this for a booked vehicle. Leave empty for the Walk-in action.</small>
-        </div>
-
-        <button class="btn btn-primary btn-block" style="padding: 0.85rem;" onclick="triggerSimulatedEntry()">
-          ↗ Validate Booking & Simulate Entry
-        </button>
-        <button id="simWalkIn" class="btn btn-secondary btn-block" style="padding: 0.85rem; margin-top: 0.65rem;" onclick="triggerWalkInEntry()">
-          + Allocate Walk-in Entry
-        </button>
-      </div>
-
-      <!-- ============================================== -->
-      <!-- 2. EXIT GATE SIMULATOR -->
-      <!-- ============================================== -->
-      <div class="sim-box">
-        <div class="sim-header">
-          <div id="simExit" class="sim-title">
-            <span>↙</span> Simulate Exit
-          </div>
-          <span class="badge-demo">Payment required</span>
-        </div>
-
-        <div class="form-group" style="margin-top: 1.25rem;">
-          <label class="form-label" for="simExitVehicleSelect">Select Currently Parked Vehicle</label>
-          <select id="simExitVehicleSelect" class="form-select">
-            <option value="">Loading parked vehicles...</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="simExitManualInput">Or Enter Ticket Code / Plate Manually</label>
-          <input type="text" id="simExitManualInput" class="form-input" placeholder="e.g. SP-ABC12345 or KA-01-MJ-5021">
-        </div>
-
-        <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
-          <button class="btn btn-success btn-block" style="padding: 0.85rem;" onclick="triggerSimulatedExit()">
-            ↙ Complete Paid Exit & Release Bay
-          </button>
-        </div>
-      </div>
-
-    </div>
-
-    <div id="simPayment" class="sim-box" style="margin-top: 1.5rem; margin-bottom: 2rem;">
-      <div class="sim-header">
-        <div class="sim-title"><span>₹</span> Simulate Payment</div>
-        <span class="badge-demo">UPI simulation</span>
-      </div>
-      <div class="form-group" style="margin-bottom: 0.75rem;">
-        <label class="form-label" for="simPaymentToken">Booking / Session Token</label>
-        <div style="display: flex; gap: 0.75rem;">
-          <input id="simPaymentToken" class="form-input" placeholder="SP-########">
-          <button class="btn btn-success" type="button" onclick="simulateAdminPayment()">Settle Payment</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Live Interactive Parking Lot Grid -->
-    <div id="parking" class="parking-map-container">
-      <div class="map-controls">
-        <div class="sim-title">
-          <span>🅿️</span> Live 2D Facility Layout (Ground Floor & Floor 1)
-        </div>
-        <div class="zone-filter-tabs">
-          <button class="tab-btn active" onclick="filterSlots('ALL', this)">All (20)</button>
-          <button class="tab-btn" onclick="filterSlots('A', this)">Zone A</button>
-          <button class="tab-btn" onclick="filterSlots('B', this)">Zone B</button>
-          <button class="tab-btn" onclick="filterSlots('EV', this)">Zone EV</button>
-          <button class="tab-btn" onclick="filterSlots('FLOOR1', this)">Floor 1</button>
-        </div>
-      </div>
-
-      <div class="parking-grid" id="parkingGrid">
-        <!-- Injected dynamically -->
-      </div>
-    </div>
-
-    <!-- Live activity and audit log -->
-    <div id="activityLog" class="sim-box" style="margin-bottom: 2.5rem;">
-      <div class="sim-header">
-        <div class="sim-title">
-          <span>💻</span> Live Parking Activity & Audit Stream
-        </div>
-        <span style="font-size: 0.8rem; color: var(--text-subtle);">Auto-refreshing every 4s</span>
-      </div>
-
-      <div class="log-terminal" id="adminGateLogFeed">
-        <div class="log-entry">
-          <span class="log-time">[SYSTEM]</span>
-          <span class="log-type-entry">READY</span>
-          <span>SMARTPARK software testing console ready.</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Digital QR Ticket Pass Modal -->
-  <div class="modal-overlay" id="ticketPassModal">
-    <div class="modal-content">
+  <main class="admin-workspace container">
+    <header class="admin-page-header"><div><div class="admin-login-kicker">Operations control center</div><h1>Parking overview</h1><p>Monitor persisted facility activity and process entry through the QR scanner.</p></div><a class="btn btn-primary" href="/admin/scanner">Open QR scanner</a></header>
+    <section class="stats-grid" aria-label="Live parking statistics">
+      <article class="stat-card"><div class="stat-label">Occupancy</div><div class="stat-value" id="adminOccupancyRate">--</div><div class="stat-desc">Current occupied capacity</div></article>
+      <article class="stat-card"><div class="stat-label">Arrivals today</div><div class="stat-value" id="adminVehiclesToday">--</div><div class="stat-desc">Persisted ticket records</div></article>
+      <article class="stat-card"><div class="stat-label">Paid revenue today</div><div class="stat-value" id="adminRevenueToday">--</div><div class="stat-desc">Recorded paid transactions</div></article>
+      <article class="stat-card"><div class="stat-label">System</div><div class="stat-value" style="font-size:1.25rem;color:var(--admin-accent)">Software only</div><div class="stat-desc">QR and database workflows</div></article>
+    </section>
+    <section id="parking" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Parking slots</div><span class="admin-status-dot">Live database view</span></div><p class="admin-slot-help">Reserved (yellow) and occupied slots have an <strong>Edit parking</strong> button. Edit vehicle or slot type, cancel a reservation, or force-remove an active parking session.</p><div id="parkingGrid" class="parking-grid"><p class="admin-empty">Loading slot availability…</p></div></section>
+    <section id="activityLog" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Recent entry and exit activity</div><span class="admin-status-dot">Audit log</span></div><div id="adminGateLogFeed" class="log-terminal"><p class="admin-empty">Loading activity…</p></div></section>
+  </main>
+  <div class="modal-overlay" id="adminParkingEditor" role="dialog" aria-modal="true" aria-labelledby="adminParkingEditorTitle" aria-hidden="true">
+    <section class="modal-content admin-parking-editor">
       <div class="modal-header">
-        <h3 style="font-weight: 700;">Simulated Ticket & Pass</h3>
-        <button class="modal-close" onclick="closeModal('ticketPassModal')">&times;</button>
+        <h2 id="adminParkingEditorTitle">Edit parking</h2>
+        <button class="modal-close" type="button" aria-label="Close editor" onclick="closeAdminParkingEditor()">&times;</button>
       </div>
-
-      <div class="ticket-qr-card">
-        <div style="font-size: 0.75rem; letter-spacing: 0.05em; color: #64748b; font-weight: 700;">SMARTPARK ENTRY PASS</div>
-        <img id="modalQrImage" class="qr-code-img" alt="QR Pass">
-        <div style="font-weight: 800; font-size: 1.2rem; margin-top: 0.25rem;" id="modalTicketCode">SP-########</div>
-
-        <div style="margin-top: 1rem;">
-          <div class="ticket-meta-row">
-            <span>Vehicle Plate:</span>
-            <strong id="modalPlateNumber">--</strong>
-          </div>
-          <div class="ticket-meta-row">
-            <span>Allocated Bay:</span>
-            <strong id="modalSlotNumber" style="color: #2563eb;">--</strong>
-          </div>
-          <div class="ticket-meta-row">
-            <span>Entry Timestamp:</span>
-            <span id="modalEntryTime">--</span>
-          </div>
+      <p class="admin-parking-editor-slot" id="adminParkingEditorSlot"></p>
+      <form id="adminParkingEditorForm">
+        <div class="form-group">
+          <label class="form-label" for="adminParkingVehicleNumber">Vehicle number</label>
+          <input class="form-input" id="adminParkingVehicleNumber" maxlength="25" required>
         </div>
-      </div>
-
-      <div id="modalNavInstructions">
-        <!-- Turn by turn guidance injected here -->
-      </div>
-
-      <button class="btn btn-secondary btn-block" style="margin-top: 1rem;" onclick="closeModal('ticketPassModal')">
-        Close Window
-      </button>
-    </div>
+        <div class="form-group">
+          <label class="form-label" for="adminParkingSlotType">Parking slot type</label>
+          <select class="form-select" id="adminParkingSlotType" required>
+            <option value="TWO_WHEELER">Two-wheeler</option>
+            <option value="COMPACT">Compact</option>
+            <option value="SUV">SUV</option>
+            <option value="EV">EV</option>
+          </select>
+        </div>
+        <p class="admin-parking-editor-message" id="adminParkingEditorMessage" role="status"></p>
+        <div class="admin-parking-editor-actions">
+          <button class="btn btn-primary" type="submit">Save changes</button>
+          <button class="btn btn-danger" id="adminForceRemoveParking" type="button">Delete / force remove</button>
+        </div>
+        <p class="admin-parking-editor-note" id="adminParkingEditorNote"></p>
+      </form>
+    </section>
   </div>
-
-  <footer>
-    <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
-  </footer>
-
-  <script src="app.js"></script>
-  <script>
-    // Initialize admin-specific data on load
-    document.addEventListener("DOMContentLoaded", () => {
-      loadAnalytics();
-      getRandomDemoPlate();
-    });
-  </script>
+  <script src="/app.js?v=admin-reserved-editor"></script>
+  <script>document.addEventListener('DOMContentLoaded', () => { loadAnalytics(); });</script>
 </body>
 </html>

@@ -10,17 +10,17 @@
 
   <!-- Navigation Bar -->
   <nav class="navbar">
-    <a href="index.html" class="nav-brand">
+    <a href="/parking" class="nav-brand">
       <div class="brand-icon">P</div>
       <span>SMARTPARK</span>
     </a>
-    <ul class="nav-links">
-      <li><a href="index.html">Live Availability</a></li>
+    <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="customerNav">Menu</button>
+    <ul class="nav-links" id="customerNav">
+      <li><a href="/parking">Live Availability</a></li>
       <li><a href="booking.html" class="active">Book a Spot</a></li>
       <li><a href="payment.html">Pay & Exit</a></li>
-      <li><a href="admin.html">Admin & Simulator</a></li>
+      <li><a href="/customer">Customer home</a></li>
       <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
-      <li><span class="badge-demo">Demo Mode Active</span></li>
     </ul>
   </nav>
 
@@ -67,6 +67,10 @@
           <button type="submit" class="btn btn-primary btn-block" style="padding: 0.85rem; font-size: 1rem; margin-top: 1.5rem;">
             🎟️ Generate Digital QR Parking Pass
           </button>
+          <button type="button" id="walkInButton" class="btn btn-secondary btn-block" style="padding: 0.85rem; font-size: 1rem; margin-top: .65rem;">
+            🚗 Start walk-in parking
+          </button>
+          <small style="display:block; color:var(--text-subtle); margin-top:.45rem;">Walk-in entry checks live availability and still requires QR scanning at the entrance.</small>
         </form>
       </div>
 
@@ -91,6 +95,7 @@
       <div class="ticket-qr-card">
         <div style="font-size: 0.75rem; letter-spacing: 0.05em; color: #64748b; font-weight: 700;">SMARTPARK ACCESS PASS</div>
         <img id="modalQrImage" class="qr-code-img" alt="QR Pass">
+        <a id="modalQrEnlarge" href="#" target="_blank" rel="noopener">Open QR larger</a>
         <div style="font-weight: 800; font-size: 1.2rem; margin-top: 0.25rem;" id="modalTicketCode">SP-########</div>
 
         <div style="margin-top: 1rem;">

@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Login | SMARTPARK</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/admin.css">
 </head>
-<body>
-  <nav class="navbar">
-    <a href="/" class="nav-brand"><div class="brand-icon">P</div><span>SMARTPARK</span></a>
-    <button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button>
+<body class="admin-login-page">
+  <nav class="admin-shell-nav">
+    <a href="/admin/login" class="admin-brand"><span class="admin-brand-mark">SP</span><span><strong>SMARTPARK</strong><small>Operations</small></span></a>
   </nav>
-  <main class="auth-shell">
-    <form class="auth-card" id="adminLoginForm">
-      <div class="auth-kicker">Restricted area</div>
+  <main class="admin-login-shell">
+    <form class="admin-login-card" id="adminLoginForm">
+      <div class="admin-login-kicker">Restricted operations access</div>
       <h1>Administrator sign in</h1>
-      <p class="auth-copy">Use your SMARTPARK administrator account to open the simulator.</p>
+      <p>Sign in with an authorized operations account to open the control center.</p>
       <div class="form-group">
         <label class="form-label" for="adminUsername">Username</label>
         <input class="form-input" id="adminUsername" autocomplete="username" required>
@@ -26,7 +26,7 @@
       </div>
       <p class="auth-error" id="adminLoginError" role="alert"></p>
       <button class="btn btn-primary btn-block" type="submit">Sign in to admin console</button>
-      <a class="auth-back" href="/">Return to live availability</a>
+      <a class="admin-login-back" href="/portals">Choose a different portal</a>
     </form>
   </main>
   <script src="/app.js"></script>

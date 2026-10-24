@@ -55,6 +55,8 @@
   padding: 0;
 }
 
+[hidden] { display: none !important; }
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
@@ -81,6 +83,7 @@ body {
   justify-content: space-between;
   align-items: center;
 }
+.mobile-menu-toggle { display: none; }
 
 .theme-toggle {
   width: 2.25rem;
@@ -122,6 +125,23 @@ body {
 .auth-card { width: min(100%, 430px); padding: 2rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--shadow-card); }
 .auth-card h1 { margin-bottom: 0.5rem; }
 .auth-kicker { color: var(--accent-light); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.auth-page { position: relative; background: radial-gradient(circle at 10% 10%, rgba(59,130,246,.2), transparent 35%), var(--bg-primary); }
+.auth-nav { background: rgba(15,23,42,.35); }
+.auth-glass { position: relative; z-index: 1; animation: authRise .55s ease both; background: rgba(255,255,255,.10); border-color: rgba(255,255,255,.24); backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px); box-shadow: 0 24px 70px rgba(2,6,23,.28); }
+.auth-lead { color: var(--text-muted); margin-bottom: 1.5rem; }
+.auth-switch { text-align: center; color: var(--text-muted); margin-top: 1.25rem; }
+.auth-error { min-height: 1.4rem; color: #fda4af; }
+.auth-submit { min-height: 2.9rem; position: relative; overflow: hidden; }
+.auth-submit:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(37,99,235,.3); }
+.auth-submit.is-loading .button-label { opacity: .35; }
+.button-spinner { display: none; position: absolute; width: 1.1rem; height: 1.1rem; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+.auth-submit.is-loading .button-spinner { display: block; }
+.auth-orb { position: absolute; width: 18rem; height: 18rem; border-radius: 50%; filter: blur(3px); opacity: .35; animation: authFloat 8s ease-in-out infinite; }
+.auth-orb-one { background: #2563eb; top: 12%; left: 0; }
+.auth-orb-two { background: #14b8a6; right: 0.5rem; bottom: 8%; animation-delay: -3s; }
+@keyframes authRise { from { opacity: 0; transform: translateY(18px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes authFloat { 50% { transform: translate(0, 22px) scale(1.05); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 .auth-copy { margin-bottom: 1.5rem; color: var(--text-muted); }
 .auth-error { min-height: 1.5rem; color: var(--status-occupied); font-size: 0.875rem; }
 .auth-back { display: block; margin-top: 1rem; color: var(--text-muted); text-align: center; }
@@ -323,6 +343,67 @@ body {
   box-shadow: var(--shadow-card);
 }
 
+.map-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.map-panel-title {
+  color: var(--text-main);
+  font-size: 1.2rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.map-panel-subtitle {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  margin-top: 0.2rem;
+}
+
+#facilityMap {
+  height: clamp(250px, 34vw, 390px);
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-elevated);
+  box-shadow: inset 0 1px 8px rgba(0, 0, 0, 0.16);
+}
+
+.map-locate-link {
+  display: inline-flex;
+  min-height: 2.65rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  border-radius: var(--radius-full);
+  background: linear-gradient(135deg, var(--accent-primary), #0ea5e9);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.24);
+  transition: var(--transition);
+}
+
+.map-locate-link:hover {
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.34);
+}
+
+.map-locate-link:focus-visible {
+  outline: 3px solid var(--accent-light);
+  outline-offset: 3px;
+}
+
 .map-controls {
   display: flex;
   justify-content: space-between;
@@ -336,6 +417,7 @@ body {
 
 .zone-filter-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
@@ -364,8 +446,10 @@ body {
 
 .legend-group {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: center;
+  min-width: 0;
   font-size: 0.8rem;
   color: var(--text-muted);
 }
@@ -646,6 +730,19 @@ body {
   color: #1e3a8a;
 }
 
+.customer-dashboard { max-width: 1050px; }
+.state-message { color: var(--text-muted); min-height: 1.5rem; }
+.customer-active-grid { display: grid; grid-template-columns: minmax(180px, .8fr) repeat(2, 1fr); gap: .75rem; align-items: center; }
+.customer-qr-card { display: grid; justify-items: center; gap: .5rem; padding: 1rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface-elevated); grid-row: span 3; }
+.customer-qr-card img { background: #fff; padding: .5rem; border-radius: 8px; }
+.customer-history-list { display: grid; gap: .75rem; }
+.customer-history-item { display: grid; grid-template-columns: repeat(5, 1fr); gap: .75rem; padding: .9rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.profile-row { display: flex; gap: .75rem; align-items: center; max-width: 620px; }
+.profile-row .form-input { flex: 1; }
+.text-success { color: var(--status-available); }
+.text-error { color: var(--status-occupied); }
+@media (max-width: 700px) { .customer-active-grid, .customer-history-item { grid-template-columns: 1fr 1fr; } .customer-qr-card { grid-column: 1 / -1; grid-row: auto; } }
+
 /* Forms & Inputs */
 .form-group {
   margin-bottom: 1rem;
@@ -835,10 +932,40 @@ body {
 .ticket-meta-row {
   display: flex;
   justify-content: space-between;
+  gap: 0.75rem;
   border-bottom: 1px dashed #e5e7eb;
   padding: 0.4rem 0;
   font-size: 0.85rem;
 }
+
+.ticket-meta-row > * { min-width: 0; overflow-wrap: anywhere; }
+
+.payment-search-row { display: flex; gap: 0.75rem; }
+.payment-search-row .form-input { min-width: 0; flex: 1; }
+.payment-search-row .btn { white-space: nowrap; }
+.payment-customer-vehicles { margin-bottom: 1rem; }
+.payment-vehicles-message { margin: 0.5rem 0; color: var(--text-muted); }
+.payment-vehicle-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: 0.75rem; margin-top: 0.75rem; }
+.payment-vehicle-card { display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; min-width: 0; padding: 0.9rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface-elevated); color: var(--text-main); text-align: left; cursor: pointer; }
+.payment-vehicle-card strong { overflow-wrap: anywhere; font-size: 1.05rem; }
+.payment-vehicle-card span { color: var(--text-muted); font-size: 0.85rem; }
+.payment-vehicle-card:hover, .payment-vehicle-card:focus-visible { border-color: var(--accent-light); outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+.portal-page { min-height: 100vh; }
+.portal-nav-link { color: var(--text-main); text-decoration: none; font-weight: 650; }
+.portal-shell { width: min(100% - 2rem, 960px); margin: auto; padding: clamp(2rem, 7vw, 5rem) 0; }
+.portal-heading { max-width: 650px; margin: 0 auto 2rem; text-align: center; }
+.portal-heading h1 { margin: 0.5rem 0; font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.1; }
+.portal-heading > p:last-child { color: var(--text-muted); }
+.portal-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.portal-card { display: flex; flex-direction: column; min-width: 0; padding: clamp(1.2rem, 4vw, 2rem); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--shadow-card); }
+.portal-card h2 { margin: 0.4rem 0; font-size: 1.45rem; }
+.portal-card p { color: var(--text-muted); }
+.portal-eyebrow { color: var(--accent-light); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+.admin-portal-card .portal-eyebrow { color: #fbbf24; }
+.portal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: auto; padding-top: 1.5rem; }
+.portal-secondary-link { color: var(--accent-light); font-weight: 650; }
+.portal-nav-link:focus-visible, .portal-secondary-link:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 3px; }
 
 /* ------------------------------------------------------------
    TOAST NOTIFICATIONS
@@ -896,12 +1023,16 @@ footer {
 
   .nav-brand { font-size: 1.1rem; }
 
+  .mobile-menu-toggle { display: inline-flex; margin-left: auto; min-height: 2.5rem; align-items: center; padding: .5rem .75rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-surface-elevated); color: var(--text-main); }
+
   .nav-links {
     width: 100%;
-    display: grid;
+    display: none;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.35rem;
   }
+
+  .nav-links.is-open { display: grid; }
 
   .admin-navbar .nav-links {
     margin-left: 0;
@@ -928,6 +1059,16 @@ footer {
   .nav-links .theme-toggle { display: block; margin: 0 auto; }
 
   .container { padding: 1.25rem 0.85rem; }
+  .portal-options { grid-template-columns: 1fr; }
+  .portal-nav-link { font-size: 0.85rem; }
+  .payment-search-row { flex-direction: column; }
+  .payment-search-row .btn { width: 100%; }
+  .ticket-meta-row { align-items: flex-start; flex-direction: column; gap: 0.15rem; }
+  .ticket-meta-row > strong { text-align: left; }
+  .payment-method-grid { grid-template-columns: 1fr !important; }
+  .payment-vehicle-list { grid-template-columns: 1fr; }
+  .profile-row { align-items: stretch; flex-direction: column; }
+  .profile-row .btn { width: 100%; min-height: 2.75rem; }
   .hero-section { padding: 1.25rem 0.25rem 2rem; }
   .hero-title { font-size: 2rem; line-height: 1.15; }
   .hero-subtitle { font-size: 0.98rem; }
@@ -962,12 +1103,22 @@ footer {
     flex-direction: column;
   }
 
+  .map-panel-header {
+    align-items: flex-start;
+  }
+
+  #facilityMap {
+    height: 250px;
+  }
+
   .zone-filter-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
   }
 
-  .tab-btn { min-height: 2.5rem; padding: 0.45rem 0.35rem; }
+  .tab-btn { min-width: 0; width: 100%; min-height: 2.5rem; padding: 0.45rem 0.35rem; white-space: normal; overflow-wrap: anywhere; }
 
   .parking-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -11,9 +11,10 @@ load_dotenv(dotenv_path=env_path)
 
 
 def _database_url():
-    # SUPABASE_DB_URL is preferred, while DATABASE_URL is supported by
-    # Render and other hosting platforms.
-    url = (os.getenv("SUPABASE_DB_URL") or os.getenv("DATABASE_URL") or "").strip()
+    # An explicitly supplied DATABASE_URL takes precedence for local/test
+    # development. Production still requires a PostgreSQL URL and can use
+    # SUPABASE_DB_URL when DATABASE_URL is not supplied.
+    url = (os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or "").strip()
 
     if not url:
         # Development-only local SQLite fallback. Production must use Supabase.
@@ -25,6 +26,9 @@ def _database_url():
 
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
+
+    if url.startswith("sqlite://") and os.getenv("FLASK_ENV", "development").lower() != "production":
+        return url
 
     if not url.startswith(("postgresql://", "postgresql+psycopg2://")):
         raise ValueError(
@@ -43,10 +47,7 @@ def _database_url():
 
 
 class Config:
-    SECRET_KEY = os.getenv(
-        "FLASK_SECRET_KEY",
-        os.getenv("SECRET_KEY", "change-this-flask-secret-key")
-    )
+    SECRET_KEY = os.getenv("FLASK_SECRET_KEY") or os.getenv("SECRET_KEY")
 
     # Supabase project credentials are server-side configuration only.
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -54,7 +55,7 @@ class Config:
     SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
     ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "CHANGE_ME")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
     # Supabase uses PostgreSQL underneath.
     DATABASE_URL = _database_url()
@@ -65,7 +66,7 @@ class Config:
         "pool_pre_ping": True,
         "pool_recycle": 300,
     }
-    AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "1") == "1"
+    AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "0" if os.getenv("FLASK_ENV", "development").lower() == "production" else "1") == "1"
 
     RATES = {
         "TWO_WHEELER": {
@@ -89,6 +90,23 @@ class Config:
     PEAK_HOURS = [(9, 11), (17, 20)]
     PEAK_MULTIPLIER = 1.25
 
-    IOT_AUTH_TOKEN = os.getenv("IOT_AUTH_TOKEN", "CHANGE_ME_IOT_TOKEN")
+    IOT_AUTH_TOKEN = os.getenv("IOT_AUTH_TOKEN")
     PORT = int(os.getenv("PORT", 5000))
-    DEBUG = os.getenv("FLASK_DEBUG", "1") == "1"
+    DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
+    FACILITY_LATITUDE = os.getenv("FACILITY_LATITUDE")
+    FACILITY_LONGITUDE = os.getenv("FACILITY_LONGITUDE")
+    MAP_TILE_URL = os.getenv("MAP_TILE_URL", "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png")
+
+    @classmethod
+    def validate(cls):
+        production = os.getenv("FLASK_ENV", "development").lower() == "production"
+        required = {"FLASK_SECRET_KEY": cls.SECRET_KEY, "ADMIN_PASSWORD": cls.ADMIN_PASSWORD}
+        if production:
+            missing = [name for name, value in required.items() if not value]
+            weak = [name for name, value in required.items() if value and (len(value) < 24 or "CHANGE_ME" in value)]
+            if missing or weak:
+                raise RuntimeError(f"Missing or weak production secrets: {', '.join(missing + weak)}")
+        else:
+            cls.SECRET_KEY = cls.SECRET_KEY or "local-development-only-secret"
+            cls.ADMIN_PASSWORD = cls.ADMIN_PASSWORD or "local-development-password"
+            cls.IOT_AUTH_TOKEN = cls.IOT_AUTH_TOKEN or ""

@@ -8,7 +8,7 @@ import logging
 import os
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime,
-    Numeric, ForeignKey, Enum as SQLEnum, text
+    Numeric, ForeignKey, Enum as SQLEnum, UniqueConstraint, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, scoped_session, relationship
 from werkzeug.security import generate_password_hash
@@ -16,6 +16,11 @@ from config import Config
 
 logger = logging.getLogger("smartpark.database")
 Base = declarative_base()
+
+
+def utc_now():
+    """Return a naive UTC datetime for compatibility with existing columns."""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 # ============================================================
 # MODELS
@@ -32,8 +37,8 @@ class User(Base):
     email = Column(String(120), unique=True, nullable=True)
     phone = Column(String(20), nullable=True)
     role = Column(SQLEnum("ADMIN", "OPERATOR", "CUSTOMER", name="user_role_enum"), default="CUSTOMER", nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     tickets = relationship("Ticket", back_populates="user")
 
@@ -47,6 +52,18 @@ class User(Base):
             "role": self.role,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
+
+
+class LoginAttempt(Base):
+    """Shared login throttle state; persisted in PostgreSQL for serverless workers."""
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(60), nullable=False, index=True)
+    remote_address = Column(String(64), nullable=False, index=True)
+    window_started_at = Column(DateTime, nullable=False)
+    failure_count = Column(Integer, nullable=False, default=0)
+    __table_args__ = (UniqueConstraint("username", "remote_address", name="uq_login_attempt_key"),)
 
 
 class ParkingSlot(Base):
@@ -77,7 +94,7 @@ class ParkingSlot(Base):
         nullable=False
     )
     active_vehicle_number = Column(String(25), nullable=True)
-    last_updated = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    last_updated = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     tickets = relationship("Ticket", back_populates="slot")
 
@@ -111,7 +128,13 @@ class Ticket(Base):
     slot_id = Column(Integer, ForeignKey("parking_slots.id", onupdate="CASCADE", ondelete="RESTRICT"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", onupdate="CASCADE", ondelete="SET NULL"), nullable=True)
     booking_time = Column(DateTime, nullable=True)
-    entry_time = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    # RESERVATION keeps the scheduled appointment; WALK_IN has no appointment.
+    entry_mode = Column(String(20), nullable=False, default="RESERVATION")
+    # NULL until a reservation is actually checked in; reservation time is not billable.
+    entry_time = Column(DateTime, nullable=True)
+    qr_expires_at = Column(DateTime, nullable=True, index=True)
+    qr_revoked_at = Column(DateTime, nullable=True)
+    qr_used_at = Column(DateTime, nullable=True)
     exit_time = Column(DateTime, nullable=True)
     duration_minutes = Column(Integer, default=0)
     base_rate = Column(Numeric(10, 2), default=20.00, nullable=False)
@@ -132,7 +155,7 @@ class Ticket(Base):
         default="ACTIVE",
         nullable=False
     )
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     slot = relationship("ParkingSlot", back_populates="tickets")
     user = relationship("User", back_populates="tickets")
@@ -148,7 +171,9 @@ class Ticket(Base):
             "floor_level": self.slot.floor_level if self.slot else 0,
             "zone": self.slot.zone if self.slot else "A",
             "booking_time": self.booking_time.strftime("%Y-%m-%d %H:%M:%S") if self.booking_time else None,
+            "entry_mode": self.entry_mode or "RESERVATION",
             "entry_time": self.entry_time.strftime("%Y-%m-%d %H:%M:%S") if self.entry_time else None,
+            "qr_expires_at": self.qr_expires_at.isoformat() if self.qr_expires_at else None,
             "exit_time": self.exit_time.strftime("%Y-%m-%d %H:%M:%S") if self.exit_time else None,
             "duration_minutes": self.duration_minutes,
             "base_rate": float(self.base_rate),
@@ -181,7 +206,7 @@ class GateLog(Base):
     )
     image_snapshot = Column(Text, nullable=True)
     notes = Column(String(255), nullable=True)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    timestamp = Column(DateTime, default=utc_now, index=True)
 
     def to_dict(self):
         return {
@@ -213,7 +238,7 @@ class SensorTelemetry(Base):
     )
     state_value = Column(String(50), nullable=False)
     voltage = Column(Numeric(4, 2), default=3.30)
-    recorded_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    recorded_at = Column(DateTime, default=utc_now, index=True)
 
     def to_dict(self):
         return {
@@ -234,7 +259,7 @@ class SystemConfig(Base):
     config_key = Column(String(50), unique=True, nullable=False)
     config_value = Column(String(255), nullable=False)
     description = Column(String(255), nullable=True)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     def to_dict(self):
         return {
@@ -289,26 +314,41 @@ def init_db(app=None):
         sessionmaker(autocommit=False, autoflush=False, bind=engine)
     )
 
-    if Config.AUTO_CREATE_SCHEMA:
+    # Production schema changes are applied explicitly through migrations.
+    is_production = os.getenv("FLASK_ENV", "development").lower() == "production"
+    if Config.AUTO_CREATE_SCHEMA and not is_production:
         logger.info("Creating or verifying SMARTPARK tables in Supabase PostgreSQL...")
         Base.metadata.create_all(bind=engine)
         logger.info("SMARTPARK database schema is ready.")
     else:
         logger.info("Automatic schema creation is disabled by AUTO_CREATE_SCHEMA=0.")
 
-    # Keep older deployments compatible with the booking_time field.
+    # Development compatibility only. Production schema changes are handled by
+    # reviewed migrations and never altered during serverless startup.
     inspector = __import__("sqlalchemy").inspect(engine)
     if inspector.has_table("bookings_and_tickets"):
         ticket_columns = {
             column["name"]
             for column in inspector.get_columns("bookings_and_tickets")
         }
-        if "booking_time" not in ticket_columns:
+        compatibility_columns = {
+            "booking_time": "TIMESTAMP NULL",
+            "qr_expires_at": "TIMESTAMP NULL",
+            "qr_revoked_at": "TIMESTAMP NULL",
+            "qr_used_at": "TIMESTAMP NULL",
+            "entry_mode": "VARCHAR(20) NOT NULL DEFAULT 'RESERVATION'",
+        }
+        missing_columns = [
+            (name, definition)
+            for name, definition in compatibility_columns.items()
+            if name not in ticket_columns
+        ]
+        if missing_columns and not is_production:
             with engine.begin() as connection:
-                connection.execute(text(
-                    "ALTER TABLE bookings_and_tickets "
-                    "ADD COLUMN booking_time TIMESTAMP NULL"
-                ))
+                for name, definition in missing_columns:
+                    connection.execute(text(
+                        f"ALTER TABLE bookings_and_tickets ADD COLUMN {name} {definition}"
+                    ))
 
     try:
         seed_initial_data()
@@ -334,7 +374,7 @@ def seed_initial_data():
         # Check if slots exist
         slot_count = session.query(ParkingSlot).count()
         if slot_count == 0:
-            logger.info("Seeding 20 initial parking slots across zones A, B, EV, and C...")
+            logger.info("Seeding 18 initial parking slots across zones A, B, and EV...")
             slots_data = [
                 # Zone A - Ground Floor Compact
                 ("A-01", 0, "A", "COMPACT", 10),
@@ -357,9 +397,6 @@ def seed_initial_data():
                 ("EV-02", 0, "EV", "EV", 21),
                 ("EV-03", 0, "EV", "EV", 29),
                 ("EV-04", 0, "EV", "EV", 38),
-                # Zone C - First Floor
-                ("C-01", 1, "C", "COMPACT", 50),
-                ("C-02", 1, "C", "SUV", 55),
             ]
             for num, floor, zone, stype, dist in slots_data:
                 slot = ParkingSlot(
@@ -387,22 +424,8 @@ def seed_initial_data():
             )
             session.add(admin)
 
-        # Check default operator account
-        operator_user = session.query(User).filter_by(username="operator").first()
-        if not operator_user:
-            operator = User(
-                username="operator",
-                password_hash=generate_password_hash("operator123"),
-                full_name="Gate Operator",
-                email="operator@smartpark.local",
-                phone="+91-9876543211",
-                role="OPERATOR"
-            )
-            session.add(operator)
-
         # Pre-seed initial pricing config
         configs = [
-            ("demo_mode", "true", "Software simulation mode"),
             ("RATE_COMPACT_BASE", "20.00", "Compact vehicle base fee"),
             ("RATE_SUV_BASE", "30.00", "SUV vehicle base fee"),
             ("RATE_TWO_WHEELER_BASE", "10.00", "Two wheeler base fee"),

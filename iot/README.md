@@ -1,12 +1,14 @@
-# SMARTPARK - IoT Hardware Integration Guide
+# SMARTPARK - Archived IoT Hardware Integration Guide
+
+> **Archived and inactive.** The application no longer runs Demo Mode,
+> simulator controls, hardware webhooks, telemetry, barriers, or firmware
+> integrations. This directory is retained only as historical reference and
+> is not required for local development or deployment.
 
 This directory contains optional firmware and wiring specifications for integrating physical IoT hardware with the **SMARTPARK** system.
 
-> [!IMPORTANT]
-> **SOFTWARE-FIRST PRINCIPLE**:
-> The entire SMARTPARK application can operate **100% standalone** when Demo Mode is enabled from the authenticated `/admin` panel.
-> You **do not** need physical ESP32 boards, IR sensors, or servo motors to run, test, or demonstrate this project.
-> All hardware actions are fully simulatable via the authenticated Admin Web Console (`/admin`).
+> These files are historical reference only. They are not imported, deployed,
+> or called by the Flask application.
 
 ---
 

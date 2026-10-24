@@ -61,7 +61,6 @@ class ParkingFacilityGraph:
         # Zone B & EV Paths
         self.add_edge("JUNCTION_B", "ZONE_B_AISLE", 6, "Turn left into Zone B (SUV & Two-Wheelers)")
         self.add_edge("JUNCTION_B", "ZONE_EV_AISLE", 8, "Turn right into EV Charging Zone")
-        self.add_edge("JUNCTION_B", "RAMP_FLOOR_1", 20, "Proceed straight up ramp to Floor 1")
 
         # Zone B Slots
         for i in range(1, 9):
@@ -76,14 +75,6 @@ class ParkingFacilityGraph:
             dist = 6 + (i * 4)
             self.add_edge("ZONE_EV_AISLE", slot, dist, f"Pull into charging bay {slot}")
             self.add_edge(slot, "EXIT_LANE_B", dist, f"Exit EV bay {slot}")
-
-        # Floor 1 (Zone C)
-        self.add_edge("RAMP_FLOOR_1", "ZONE_C_AISLE", 15, "Ascend ramp to Level 1")
-        self.add_edge("ZONE_C_AISLE", "C-01", 10, "Turn left into bay C-01")
-        self.add_edge("ZONE_C_AISLE", "C-02", 15, "Proceed to bay C-02")
-        self.add_edge("C-01", "DOWN_RAMP", 12, "Exit Level 1 via down ramp")
-        self.add_edge("C-02", "DOWN_RAMP", 15, "Exit Level 1 via down ramp")
-        self.add_edge("DOWN_RAMP", "EXIT_LANE_B", 20, "Merge into ground level exit")
 
         self.add_edge("EXIT_LANE_B", "EXIT_GATE", 8, "Approach Exit Gate Barrier")
 
@@ -168,9 +159,12 @@ class SlotAllocationService:
     def find_and_assign_slot(session, vehicle_type, vehicle_number=None):
         vehicle_type = (vehicle_type or "COMPACT").upper()
         # Query all available slots
+        # PostgreSQL row locks serialize allocation decisions. Every caller locks
+        # slots in the same deterministic order, preventing duplicate allocation.
         available_slots = session.query(ParkingSlot).filter(
-            ParkingSlot.status == "AVAILABLE"
-        ).all()
+            ParkingSlot.status == "AVAILABLE",
+            ParkingSlot.floor_level == 0
+        ).order_by(ParkingSlot.id.asc()).with_for_update().all()
 
         if not available_slots:
             return None, "All parking slots are currently full!"
@@ -228,7 +222,7 @@ class SlotAllocationService:
         chosen_slot.status = "OCCUPIED"
         chosen_slot.sensor_state = "DETECTED"
         chosen_slot.active_vehicle_number = vehicle_number
-        chosen_slot.last_updated = datetime.datetime.utcnow()
+        chosen_slot.last_updated = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         session.flush()
 
         # Compute driving directions using Dijkstra
@@ -383,7 +377,7 @@ class BillingService:
         vehicle_type = (vehicle_type or "COMPACT").upper()
         entry_time = utc_naive(entry_time)
         if exit_time is None:
-            exit_time = datetime.datetime.utcnow()
+            exit_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         exit_time = utc_naive(exit_time)
 
         # Compute duration
@@ -466,7 +460,7 @@ class IoTGatewayService:
         cls.hardware_state["entry_barrier"] = {
             "status": "OPEN" if action == "OPEN" else "CLOSED",
             "angle": angle,
-            "last_action": datetime.datetime.utcnow().isoformat()
+            "last_action": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         }
         logger.info(f"[HARDWARE SIMULATOR] Entry Barrier Servo set to {angle} degrees ({action})")
         return cls.hardware_state["entry_barrier"]
@@ -477,7 +471,7 @@ class IoTGatewayService:
         cls.hardware_state["exit_barrier"] = {
             "status": "OPEN" if action == "OPEN" else "CLOSED",
             "angle": angle,
-            "last_action": datetime.datetime.utcnow().isoformat()
+            "last_action": datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         }
         logger.info(f"[HARDWARE SIMULATOR] Exit Barrier Servo set to {angle} degrees ({action})")
         return cls.hardware_state["exit_barrier"]

@@ -4,23 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SMARTPARK | Smart Parking Management System</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=map-locate">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
 <body>
 
   <!-- Top Navigation Bar -->
   <nav class="navbar">
-    <a href="index.html" class="nav-brand">
+    <a href="/" class="nav-brand">
       <div class="brand-icon">P</div>
       <span>SMARTPARK</span>
     </a>
-    <ul class="nav-links">
-      <li><a href="index.html" class="active">Live Availability</a></li>
+    <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="customerNav">Menu</button>
+    <ul class="nav-links" id="customerNav">
+      <li><a href="/parking" class="active">Live Availability</a></li>
       <li><a href="booking.html">Book a Spot</a></li>
       <li><a href="payment.html">Pay & Exit</a></li>
-      <li><a href="admin.html">Admin & Simulator</a></li>
+      <li><a href="/customer">Customer account</a></li>
       <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
-      <li><span class="badge-demo">Demo Mode Active</span></li>
     </ul>
   </nav>
 
@@ -37,7 +38,6 @@
       <div style="display: flex; gap: 1rem; justify-content: center; margin-bottom: 2rem;">
         <a href="booking.html" class="btn btn-primary">🚗 Reserve a Spot</a>
         <a href="payment.html" class="btn btn-secondary">💳 Pay Parking Ticket</a>
-        <a href="admin.html" class="btn btn-secondary">⚡ Launch Admin Console</a>
       </div>
     </section>
 
@@ -49,7 +49,7 @@
           <span class="stat-icon">🅿️</span>
         </div>
         <div class="stat-value" id="statTotalSlots">20</div>
-        <div class="stat-desc">Bays across Zones A, B, EV & C</div>
+        <div class="stat-desc">Bays across Zones A, B & EV</div>
       </div>
 
       <div class="stat-card">
@@ -82,13 +82,22 @@
 
     <!-- Live Interactive Parking Map -->
     <div class="parking-map-container">
+      <div class="map-panel-header">
+        <div>
+          <h2 class="map-panel-title">Find SMARTPARK</h2>
+          <p class="map-panel-subtitle">Explore the facility and check live parking availability.</p>
+        </div>
+        <a id="locateFacility" class="map-locate-link" href="#" target="_blank" rel="noopener noreferrer" hidden>
+          <span aria-hidden="true">↗</span> Locate
+        </a>
+      </div>
+      <div id="facilityMap" aria-label="Map showing the SMARTPARK facility location"></div>
       <div class="map-controls">
         <div class="zone-filter-tabs">
           <button class="tab-btn active" onclick="filterSlots('ALL', this)">All Slots</button>
           <button class="tab-btn" onclick="filterSlots('A', this)">Zone A (Compact)</button>
           <button class="tab-btn" onclick="filterSlots('B', this)">Zone B (SUV & Bike)</button>
           <button class="tab-btn" onclick="filterSlots('EV', this)">Zone EV (Fast Charge)</button>
-          <button class="tab-btn" onclick="filterSlots('FLOOR1', this)">Floor 1 (Deck)</button>
         </div>
 
         <div class="legend-group">
@@ -153,6 +162,7 @@
     <p>SMARTPARK System &copy; 2026. Built with Python Flask, Supabase PostgreSQL, DSA & Vanilla Web Technologies.</p>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=deck-removal-map-locate"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </body>
 </html>

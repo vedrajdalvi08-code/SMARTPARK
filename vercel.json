@@ -22,11 +22,15 @@
     },
     {
       "src": "/admin/login",
-      "dest": "/frontend/admin-login.html"
+      "dest": "/api/index.py"
     },
     {
       "src": "/admin",
-      "dest": "/frontend/admin.html"
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/admin/scanner",
+      "dest": "/api/index.py"
     },
     {
       "src": "/booking",
@@ -38,7 +42,23 @@
     },
     {
       "src": "/admin.html",
-      "dest": "/frontend/admin.html"
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/admin/(.*)",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/customer",
+      "dest": "/frontend/customer.html"
+    },
+    {
+      "src": "/customer/login",
+      "dest": "/frontend/customer-login.html"
+    },
+    {
+      "src": "/customer/register",
+      "dest": "/frontend/customer-register.html"
     },
     {
       "src": "/(.*)",

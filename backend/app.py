@@ -6,8 +6,6 @@ Flask REST API server and static frontend host.
 import os
 import sys
 import logging
-import threading
-import time
 from pathlib import Path
 from flask import Flask, send_from_directory, jsonify, redirect, session
 from flask_cors import CORS
@@ -15,7 +13,6 @@ from flask_cors import CORS
 from config import Config
 from database import init_db
 from routes import api
-from services import IoTGatewayService
 
 # Configure logging
 logging.basicConfig(
@@ -28,21 +25,43 @@ logger = logging.getLogger("smartpark.app")
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
+
+def _session_cookie_secure():
+    """Keep production cookies secure while allowing explicit local HTTP use."""
+    configured = os.getenv("SESSION_COOKIE_SECURE")
+    if configured is None:
+        return os.getenv("FLASK_ENV", "development").lower() == "production"
+
+    value = configured.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError("SESSION_COOKIE_SECURE must be a boolean value.")
+
+
 def create_app():
     """Application factory for SMARTPARK."""
+    Config.validate()
     app = Flask(__name__, static_folder=None)
     app.config.from_object(Config)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = os.getenv("FLASK_ENV", "development").lower() == "production"
+    app.config["SESSION_COOKIE_SECURE"] = _session_cookie_secure()
 
     # Enable Cross-Origin Resource Sharing
     # In production the Vercel frontend normally reaches the API through the
     # same-origin /api proxy. Keep direct backend access configurable for
     # local development and ESP32/browser testing.
-    allowed_origins = os.getenv("CORS_ORIGINS", "*")
-    origins = "*" if allowed_origins.strip() == "*" else [o.strip() for o in allowed_origins.split(",") if o.strip()]
+    allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000")
+    origins = [o.strip() for o in allowed_origins.split(",") if o.strip()]
     CORS(app, resources={r"/api/*": {"origins": origins, "supports_credentials": True}})
+
+    @app.after_request
+    def expose_csrf_token(response):
+        if (session.get("admin_user") or session.get("customer_user")) and session.get("csrf_token"):
+            response.headers["X-CSRF-Token"] = session["csrf_token"]
+        return response
 
     # Initialize Database Connection
     with app.app_context():
@@ -61,11 +80,18 @@ def create_app():
     # --------------------------------------------------------
     @app.route("/")
     def index():
+        return redirect("/portals")
+
+    @app.route("/parking")
+    def customer_parking_page():
         return send_from_directory(str(FRONTEND_DIR), "index.html")
 
     @app.route("/admin")
+    @app.route("/admin/")
     def admin_page():
         if not session.get("admin_user"):
+            if session.get("customer_user"):
+                return redirect("/customer")
             return redirect("/admin/login")
         return send_from_directory(str(FRONTEND_DIR), "admin.html")
 
@@ -73,11 +99,69 @@ def create_app():
     def admin_login_page():
         if session.get("admin_user"):
             return redirect("/admin")
+        if session.get("customer_user"):
+            return redirect("/customer")
         return send_from_directory(str(FRONTEND_DIR), "admin-login.html")
 
     @app.route("/admin.html")
     def legacy_admin_page():
+        if not session.get("admin_user"):
+            if session.get("customer_user"):
+                return redirect("/customer")
+            return redirect("/admin/login")
         return redirect("/admin")
+
+    @app.route("/admin/dashboard")
+    @app.route("/admin/dashboard/")
+    @app.route("/admin/<path:admin_path>")
+    def protected_admin_page(admin_path="dashboard"):
+        """Keep every admin HTML path behind the Flask session guard."""
+        if not session.get("admin_user"):
+            if session.get("customer_user"):
+                return redirect("/customer")
+            return redirect("/admin/login")
+        return send_from_directory(str(FRONTEND_DIR), "admin.html")
+
+    @app.route("/admin/scanner")
+    @app.route("/admin/scanner/")
+    def admin_scanner_page():
+        if not session.get("admin_user"):
+            if session.get("customer_user"):
+                return redirect("/customer")
+            return redirect("/admin/login")
+        return send_from_directory(str(FRONTEND_DIR), "admin-scanner.html")
+
+    @app.route("/customer")
+    @app.route("/customer/")
+    def customer_page():
+        if session.get("admin_user"):
+            return redirect("/admin")
+        return send_from_directory(str(FRONTEND_DIR), "customer.html")
+
+    @app.route("/customer/login")
+    def customer_login_page():
+        if session.get("customer_user"):
+            return redirect("/customer")
+        if session.get("admin_user"):
+            return redirect("/admin")
+        return send_from_directory(str(FRONTEND_DIR), "customer-login.html")
+
+    @app.route("/customer/register")
+    def customer_register_page():
+        if session.get("customer_user"):
+            return redirect("/customer")
+        if session.get("admin_user"):
+            return redirect("/admin")
+        return send_from_directory(str(FRONTEND_DIR), "customer-register.html")
+
+    @app.route("/portals")
+    @app.route("/portal")
+    def portal_selector_page():
+        if session.get("admin_user"):
+            return redirect("/admin")
+        if session.get("customer_user"):
+            return redirect("/customer")
+        return send_from_directory(str(FRONTEND_DIR), "portals.html")
 
     @app.route("/<path:filename>")
     def serve_frontend_files(filename):
@@ -88,42 +172,13 @@ def create_app():
         html_target = FRONTEND_DIR / f"{filename}.html"
         if html_target.exists() and html_target.is_file():
             return send_from_directory(str(FRONTEND_DIR), f"{filename}.html")
-        return send_from_directory(str(FRONTEND_DIR), "index.html")
+        return send_from_directory(str(FRONTEND_DIR), "404.html"), 404
 
     @app.errorhandler(500)
     def handle_server_error(e):
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
     return app
-
-
-def start_barrier_auto_reset_daemon():
-    """
-    Background daemon thread to automatically reset opened barrier gates
-    back to CLOSED (0 degrees) after 6 seconds, mirroring real-world servo behavior.
-    """
-    def reset_loop():
-        while True:
-            try:
-                time.sleep(2)
-                # Check Entry Barrier
-                entry = IoTGatewayService.hardware_state["entry_barrier"]
-                if entry["status"] == "OPEN":
-                    time.sleep(4)
-                    IoTGatewayService.trigger_entry_barrier("CLOSED")
-                    IoTGatewayService.set_ir_sensor("IR_ENTRY", False)
-
-                # Check Exit Barrier
-                exit_barrier = IoTGatewayService.hardware_state["exit_barrier"]
-                if exit_barrier["status"] == "OPEN":
-                    time.sleep(4)
-                    IoTGatewayService.trigger_exit_barrier("CLOSED")
-                    IoTGatewayService.set_ir_sensor("IR_EXIT", False)
-            except Exception as e:
-                pass
-
-    daemon = threading.Thread(target=reset_loop, daemon=True)
-    daemon.start()
 
 
 if __name__ == "__main__":
@@ -133,9 +188,6 @@ if __name__ == "__main__":
     logger.info("Target Database: Supabase PostgreSQL")
     logger.info(f"Frontend URL: http://localhost:{Config.PORT}")
     logger.info("=" * 60)
-
-    # Launch barrier auto-reset background supervisor.
-    start_barrier_auto_reset_daemon()
 
     app.run(
         host="0.0.0.0",
