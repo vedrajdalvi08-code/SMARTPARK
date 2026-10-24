@@ -1,268 +1,381 @@
-# SMARTPARK - Smart Parking Management System
+# SMARTPARK
 
-**SMARTPARK** is a software-only Smart Parking Management System engineered with Python, Supabase PostgreSQL, Data Structures & Algorithms (DSA), and modern Vanilla HTML5/CSS3/JavaScript, with server-validated QR entry, billing, and exit workflows.
+SMARTPARK is a software-only parking management application. It provides
+customer and administrator portals, live bay availability, reservations,
+server-generated QR passes, administrator-authorized check-in, ticket lookup,
+estimated and final billing, a development-only simulated payment flow, and
+parking-session history.
 
----
+The application is built with Python and Flask, SQLAlchemy, PostgreSQL
+(typically hosted by Supabase), and a responsive HTML/CSS/vanilla JavaScript
+frontend. It is designed for demonstrations and academic projects. It does
+not connect to a real payment processor or physical parking-gate hardware.
 
-## 🌟 Key Highlights & Academic Viva Guide
+For a system diagram, component descriptions, and the main request flows, see
+[architecture.md](./architecture.md).
 
-This project is architected for college demonstrations, technical vivas, and real-world deployment:
+## Contents
 
-1. **Python Backend**: Built with Flask, SQLAlchemy ORM, and psycopg2.
-2. **Supabase PostgreSQL database**: Pure relational database design (`database/schema.sql`) featuring foreign key constraints, `utf8mb4` encoding, indexes, and audit logs.
-3. **Data Structures & Algorithms (DSA)**:
-   - **Min-Heap Priority Queue (`heapq`)**: Achieves `O(log N)` nearest-slot allocation based on Euclidean/road distance from the entry gate and vehicle compatibility.
-   - **Graph Representation & Dijkstra's Algorithm**: Generates turn-by-turn driving directions (`O((V + E) log V)`) from the Entry Gate to the allocated bay and from the bay to the Exit Gate.
-   - **Hash Map Indexing**: Constant-time `O(1)` active session lookups by vehicle plate and digital QR token.
-4. **Software-only operation**:
-   - Runs without physical gate hardware. Entry and exit are completed through protected QR and database workflows.
-5. **Security & Best Practices**:
-   - Salted password hashing (PBKDF2/SHA256).
-   - SQL injection immunization via SQLAlchemy ORM parameter binding.
-   - Session authentication, CSRF protection, rate limiting, and server-side QR validation.
-6. **Software-only operation**:
-   - Entry and exit are performed through protected admin workflows; retired IoT routes return `410 Gone`.
+- [Features](#features)
+- [Technology](#technology)
+- [Portals and routes](#portals-and-routes)
+- [Parking and ticket lifecycle](#parking-and-ticket-lifecycle)
+- [Algorithms and services](#algorithms-and-services)
+- [Project layout](#project-layout)
+- [Local development](#local-development)
+- [Configuration](#configuration)
+- [Database setup and migrations](#database-setup-and-migrations)
+- [Vercel deployment](#vercel-deployment)
+- [Tests and checks](#tests-and-checks)
+- [Limitations and security notes](#limitations-and-security-notes)
+- [Demonstration flow](#demonstration-flow)
 
----
+## Features
 
-## 📁 Project Directory Structure
+### Customer experience
 
-```
-SMARTPARK/
-│
+- Public parking page with live slot counts, slot states, parking-zone filters,
+  a Leaflet map, and a Google Maps **Locate** link.
+- Reserve a specific available slot or request an automatically selected
+  compatible slot.
+- Generate and retrieve QR passes from the application; ticket QR content is
+  not sent to an external QR-generation service.
+- Register for a customer account, sign in, manage basic profile information,
+  and review owned reservations, active sessions, and completed payments.
+- Use ticket-code lookup for guest bookings. Customer-owned ticket details are
+  scoped to the signed-in customer.
+- Cancel an eligible future reservation; cancellation revokes the QR pass and
+  releases the reserved bay.
+
+### Administrator experience
+
+- Dedicated administrator portal and scanner.
+- View facility availability, analytics, recent gate logs, bookings, and
+  active parking sessions.
+- Validate a ticket QR and use the protected scanner workflow to check in a
+  reservation.
+- Edit the vehicle number or slot type for an occupied or reserved slot, or
+  clear an eligible reservation/occupancy.
+- Walk-in and entry/exit tools support the software-only workflow.
+- Login failure limits are stored in the database: 15 failed administrator
+  attempts per 15-minute window and 5 failed customer attempts per window.
+- Public slot and capacity data refreshes in the browser on a short polling
+  interval; the current frontend polls every four seconds.
+
+### Operations and payment
+
+- Parking sessions and slot changes are recorded in PostgreSQL.
+- Capacity and availability exclude retired non-ground-level bays.
+- Billing calculates a vehicle-type base rate, additional billable hours,
+  configured peak surcharge, and simulated GST.
+- The payment interface and API are a **development simulation**. No real
+  payment provider is connected and no money is transferred.
+- Successful simulated payment marks the ticket complete and releases its
+  bay; the completed ticket remains as history.
+- QR, entry, and other state-changing operations are checked by backend
+  authorization and CSRF protections where applicable.
+
+## Technology
+
+| Layer | Technology |
+| --- | --- |
+| Browser UI | HTML5, CSS3, vanilla JavaScript |
+| Interactive facility map | Leaflet with OpenStreetMap tiles |
+| Web framework / API | Python 3.12, Flask, Flask-CORS |
+| Database access | SQLAlchemy ORM and psycopg2 |
+| Production database | PostgreSQL; Supabase is the documented host |
+| QR generation | Python `qrcode` and Pillow, generated by the backend |
+| Production hosting | Vercel Python Function and static asset routes |
+| Local test database | SQLite in the test suite |
+| Test runner | pytest |
+
+The ANPR service is demo-grade: requests can provide a plate directly, and
+image recognition currently uses heuristic/demo behavior rather than a
+production OCR model. Do not use its output as a real access-control decision.
+
+## Portals and routes
+
+| Page | Route | Description |
+| --- | --- | --- |
+| Portal chooser | `/` or `/portals` | Select customer or administrator access. |
+| Public parking | `/parking` | Live capacity, map, filters, and available bays. |
+| Booking | `/booking` | Create a reservation and display its ticket/QR pass. |
+| Payment and ticket lookup | `/payment` | Look up a ticket, view an estimate or final bill, and use the demo payment workflow. |
+| Customer home | `/customer` | Account profile, passes, reservations, sessions, and payment history. |
+| Customer sign-in | `/customer/login` | Customer authentication. |
+| Customer registration | `/customer/register` | Create a customer account. |
+| Administrator sign-in | `/admin/login` | Administrator authentication. |
+| Administrator dashboard | `/admin` | Protected operations and analytics dashboard. |
+| Administrator scanner | `/admin/scanner` | Protected QR scanner and check-in workflow. |
+
+The backend API is mounted at `/api`. Key API groups include:
+
+| API paths | Purpose |
+| --- | --- |
+| `/api/status`, `/api/slots` | Facility location, capacity counters, and active slot inventory. |
+| `/api/slots/reserve` | Create a reservation. |
+| `/api/auth/*`, `/api/customer/*` | Customer authentication, profile, history, walk-ins, and cancellation. |
+| `/api/admin/login`, `/api/admin/logout`, `/api/admin/me` | Administrator session lifecycle. |
+| `/api/admin/qr/*`, `/api/admin/slots/*` | Protected QR check-in and per-slot administration. |
+| `/api/tickets/*`, `/api/payment/process` | Ticket details, QR image, billing, and simulated payment. |
+| `/api/analytics`, `/api/admin/reset-demo` | Administrator metrics and explicit demo reset action. |
+
+Routes for old hardware webhooks and direct simulated entry are retired and
+return `410 Gone`; see [Limitations and security notes](#limitations-and-security-notes).
+
+## Parking and ticket lifecycle
+
+1. The customer selects an available bay or asks the backend to allocate one.
+   A reservation creates an active ticket in the database and reserves its
+   bay.
+2. A customer QR pass identifies the ticket. The administrator scanner
+   validates the ticket against the database; QR payload text alone does not
+   authorize entry.
+3. On successful check-in, the ticket receives an entry timestamp and the bay
+   becomes occupied. Upcoming reservations are estimates only; they are not
+   billable sessions until check-in.
+4. The customer can view an estimate while the vehicle is parked. Simulated
+   payment computes the final amount, marks the ticket complete, and releases
+   the bay in the same database transaction.
+5. The ticket, payment result, and gate/audit information remain available in
+   history. Eligible future reservations can be cancelled, which revokes their
+   QR pass and releases their bay.
+
+## Algorithms and services
+
+- **Compatible bay allocation:** available ground-level candidates are
+  filtered by vehicle compatibility. A heap prioritizes slot-type compatibility
+  and then distance from the entry; the selected bay is updated within the
+  database transaction.
+- **Facility navigation:** an in-memory weighted adjacency graph models the
+  entry, aisles, bays, and exit. Dijkstra's algorithm returns a route and
+  directional instructions to a bay.
+- **Billing:** rounds parking duration up to billable hours after the first
+  included hour, applies configured vehicle rates and peak surcharge, and
+  reports a simulated 5% GST line.
+- **Authentication:** customer passwords are stored as Werkzeug password
+  hashes; the single configured administrator account is provided through
+  environment configuration.
+- **Concurrency:** reservation, check-in, payment, cancellation, and
+  administrator edits use database row locks where needed to avoid conflicting
+  slot/ticket updates on PostgreSQL.
+
+## Project layout
+
+```text
+.
+├── api/
+│   └── index.py                    # Vercel Python entrypoint
 ├── backend/
-│   ├── app.py                  # Flask server entry point & static host
-│   ├── wsgi.py                 # Production WSGI entry point (Gunicorn)
-│   ├── config.py               # Configuration & dynamic tariff settings
-│   ├── database.py             # SQLAlchemy models (User, ParkingSlot, Ticket, GateLog)
-│   ├── routes.py               # REST APIs (Booking, ANPR, Billing, admin workflows)
-│   ├── services.py             # DSA (Min-Heap, Dijkstra), ANPR & Billing logic
-│   ├── requirements.txt        # Python dependencies (includes Gunicorn)
-│   ├── Procfile                # Platform deployment config (Heroku/Render)
-│   ├── production.env.example  # Production environment template
-│   ├── .env.example            # Environment variable template (dev)
-│   └── .env                    # Active configuration (dev)
-│
-├── frontend/
-│   ├── index.html              # Public landing page & live bay availability map
-│   ├── booking.html            # Customer pre-booking portal & QR pass generator
-│   ├── payment.html            # Checkout, duration counter, dynamic pricing & payment gateway
-│   ├── admin.html              # Admin dashboard, QR scanner & software testing console
-│   ├── style.css               # Glassmorphism dark-theme design system
-│   └── app.js                  # Single-page client logic & real-time polling
-│
+│   ├── app.py                      # Flask app factory and page routes
+│   ├── config.py                   # Environment and database configuration
+│   ├── database.py                 # SQLAlchemy models, initialization, seed data
+│   ├── routes.py                   # HTTP API routes and authorization
+│   ├── services.py                 # Allocation, navigation, ANPR demo, billing
+│   ├── wsgi.py                     # WSGI application entrypoint
+│   ├── requirements.txt            # Backend dependencies
+│   ├── .env.example                # Environment template
+│   └── production.env.example      # Production environment template
 ├── database/
-│   └── schema.sql              # Supabase PostgreSQL schema
-│
-├── vercel.json                 # Vercel deployment configuration
-├── README.md                   # Project documentation & viva guide
-└── .gitignore
+│   └── schema.sql                  # Destructive fresh-database schema
+├── frontend/
+│   ├── index.html                  # Public live parking experience
+│   ├── booking.html                # Reservation UI
+│   ├── payment.html                # Ticket and payment UI
+│   ├── customer*.html              # Customer account pages
+│   ├── admin*.html                 # Administrator pages
+│   ├── app.js                      # Browser API and UI behavior
+│   ├── style.css                   # Shared styles
+│   └── admin.css                   # Administrator-specific styles
+├── migrations/                     # Ordered, explicit PostgreSQL upgrades
+├── scripts/postgres_harness.py     # Guarded disposable PostgreSQL test harness
+├── tests/                          # Application and migration-harness tests
+├── .python-version                 # Vercel Python runtime pin
+├── requirements.txt                # Root Python dependency manifest
+└── vercel.json                     # Vercel function/static routing
 ```
 
----
+Do not commit `.env` files, local database files, credentials, or production
+connection strings. The active local `backend/.env` is intentionally not
+documented or included here.
 
-## 🚀 Quickstart Guide
+## Local development
 
-### 1. Prerequisites
-- Python 3.9+ (Python 3.10 / 3.11 / 3.12 supported)
-- A Supabase project with PostgreSQL enabled
+### Requirements
 
-### 2. Database Setup
+- Python 3.12 (pinned for Vercel; local Python 3.10+ is recommended).
+- pip.
+- PostgreSQL for deployment-like verification; ordinary unit tests use an
+  in-memory SQLite database.
 
-For ordinary local development, the test configuration uses an in-memory
-SQLite database and creates tables for the test process. This is convenient for
-UI/API development but does not validate PostgreSQL locking or migration
-behavior.
+### Install and configure
 
-For a real database, use an isolated PostgreSQL database and follow
-[`migrations/README.md`](migrations/README.md). The destructive
-`database/schema.sql` file is only for a disposable empty database. Existing
-databases must use ordered migrations. The application never runs migrations
-automatically at startup.
+From the repository root:
 
-### 3. Backend Setup
-1. Navigate to the `backend/` directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a virtual environment (optional but recommended):
-   ```bash
-   python -m venv venv
-   # On Windows:
-   venv\Scripts\activate
-   # On macOS/Linux:
-   source venv/bin/activate
-   ```
-3. Install required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. For local SQLite development, create `backend/.env` from the safe template
-   and verify the development values:
-   ```ini
-   DATABASE_URL=sqlite:///smartpark_demo.db
-   AUTO_CREATE_SCHEMA=1
-   SESSION_COOKIE_SECURE=0
-   FLASK_SECRET_KEY=CHANGE_ME
-   ADMIN_PASSWORD=CHANGE_ME
-   ```
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
 
-   Set a non-default local admin username/password. Never use these values in
-   production; production requires PostgreSQL and `AUTO_CREATE_SCHEMA=0`.
-   `SESSION_COOKIE_SECURE=0` is for local HTTP only; keep it enabled for
-   production HTTPS deployments.
+Create `backend/.env` locally and configure a development-only database and
+secrets. For example, use `DATABASE_URL=sqlite:///smartpark_demo.db`,
+`FLASK_ENV=development`, `AUTO_CREATE_SCHEMA=1`, and
+`SESSION_COOKIE_SECURE=0`. Set a non-default local `ADMIN_PASSWORD` and a
+local `FLASK_SECRET_KEY`; do not paste production credentials into source or
+commit the `.env` file.
 
-### 4. Run the Server
-Launch the unified Flask server:
+### Start the application
+
 ```bash
 cd backend
 python app.py
 ```
 
-The application will start on: **`http://localhost:5000`**
+Open [http://localhost:5000](http://localhost:5000). Use `/` for the portal
+chooser, `/parking` for public availability, `/admin/login` for admin, and
+`/customer/login` for customer access.
 
----
+For local HTTPS or production-like serving, the WSGI entrypoint can be run
+with Gunicorn:
 
-## 🚀 Production Deployment
-
-For production deployments, use **Gunicorn** (production WSGI server) instead of Flask's development server, and connect to your Supabase PostgreSQL database.
-
-### 1. Production Dependencies
-```bash
-pip install -r backend/requirements.txt
-```
-
-### 2. Configure Production Environment
-Copy the production template and fill in secure values:
-```bash
-cp backend/production.env.example backend/.env
-# Edit backend/.env with your actual secrets, database password, etc.
-```
-
-### 3. Supabase connection
-
-For production, the Flask backend must be able to reach the Supabase PostgreSQL database. Do not use `localhost` for the production database.
-
-### 4. Start with Gunicorn
 ```bash
 cd backend
-gunicorn -w 4 -b 0.0.0.0:5000 wsgi:app
+gunicorn -w 2 -b 0.0.0.0:5000 wsgi:app
 ```
 
-The app will be available at **`http://localhost:5000`**.
+## Configuration
 
-### 5. Deployment to Cloud Platforms
-| Platform | Config | Notes |
-| :--- | :--- | :--- |
-| **Vercel** | `vercel.json` in project root | Deploys the frontend and Flask API as one project; configure production environment variables in Vercel |
-| **Heroku / Render** | `backend/Procfile` | Set `BACKEND_URL` env var to your backend URL |
-| **Railway** | `backend/requirements.txt` + `Procfile` | Auto-detects Python/Flask app |
+The backend loads `backend/.env` for local development and reads environment
+variables supplied by the host in deployments.
 
-### 6. Deploying to Vercel
-1. Import the repository into Vercel with the repository root as the project root. Keep the default build and output settings; `.python-version` pins the function runtime to Python 3.12, and `vercel.json` routes API and authenticated pages through the Flask function and serves static frontend assets separately.
-2. Prepare the Supabase schema:
-   - For a brand-new, dedicated database that has been verified empty, run `database/schema.sql` once to create the base tables and types, then apply `migrations/000_migration_tracking.sql` through `migrations/003_retire_first_deck.sql` in order.
-   - For an existing SMARTPARK database, take a backup, verify the target, test pending migrations on staging, and apply only unapplied files in `migrations/` in order. Never run `database/schema.sql` against an existing database.
-3. Add the production variables in **Project Settings > Environment Variables** for Production and Preview as appropriate. Required:
-   - `FLASK_ENV=production`
-   - `FLASK_DEBUG=0`
-   - `AUTO_CREATE_SCHEMA=0`
-   - `SESSION_COOKIE_SECURE=1`
-   - `FLASK_SECRET_KEY` set to a unique random secret
-   - `ADMIN_USERNAME` and a new, strong `ADMIN_PASSWORD`
-   - `SUPABASE_DB_URL` set to the Supabase PostgreSQL connection string (or use `DATABASE_URL` instead)
-4. Set `CORS_ORIGINS` to the deployed site origin if browser clients will call the API from another origin. Same-origin Vercel frontend requests do not require cross-origin access.
-5. Deploy a Preview first. Verify `/`, `/portals`, `/parking`, customer/admin login, `/api/status`, and a database-backed read before promoting to Production. Confirm the status response has the expected facility coordinates and parking capacity.
+| Variable | Required / default | Purpose |
+| --- | --- | --- |
+| `FLASK_ENV` | `development` locally; `production` when deployed | Selects production validation and disables the development SQLite fallback. |
+| `FLASK_DEBUG` | `0` recommended | Enables Flask debug mode only when explicitly set to `1`; never enable in production. |
+| `FLASK_SECRET_KEY` | Required in production | Signs Flask sessions; use a long, random, deployment-specific value. |
+| `ADMIN_USERNAME` | Defaults to `admin` | Configured administrator login name. |
+| `ADMIN_PASSWORD` | Required in production | Configured administrator password; must be strong and unique. |
+| `DATABASE_URL` | Optional | PostgreSQL URL (or local SQLite URL during development); takes precedence over `SUPABASE_DB_URL`. |
+| `SUPABASE_DB_URL` | Required in production if `DATABASE_URL` is absent | Supabase PostgreSQL connection string. |
+| `AUTO_CREATE_SCHEMA` | Development default `1`; production default `0` | Allows development schema creation; production schema changes must use reviewed migrations. |
+| `SESSION_COOKIE_SECURE` | Production default enabled | Set to `0` only for local HTTP. Keep enabled behind HTTPS. |
+| `DB_CONNECT_TIMEOUT` | `10` seconds | PostgreSQL connection timeout. |
+| `CORS_ORIGINS` | Localhost origins | Comma-separated allowed origins for direct cross-origin browser API requests. |
+| `FACILITY_LATITUDE`, `FACILITY_LONGITUDE` | Optional | Coordinates for the Leaflet marker and Google Maps Locate link. |
+| `RATE_*_BASE`, `RATE_*_HOURLY` | Configured defaults in `backend/config.py` | Vehicle-type pricing values. |
 
-Vercel functions are stateless and can be restarted at any time, so production state must remain in PostgreSQL. Do not use the local SQLite fallback in Vercel. Schema changes are not applied at startup; use the ordered migrations and verify they are recorded in `smartpark_migrations`. The migration for retiring existing deck slots is also an explicit database operation and is not run by deployment.
+In production, `FLASK_SECRET_KEY` and `ADMIN_PASSWORD` must be at least 24
+characters and must not be template values. Use randomly generated,
+deployment-specific values. The application connects directly to PostgreSQL using `SUPABASE_DB_URL` or
+`DATABASE_URL`. Supabase API keys are not a substitute for this PostgreSQL
+connection string. Only set additional Supabase API credentials if a separate
+integration requires them.
 
-Do not reuse local development credentials as deployment secrets. If a credential has been exposed in an editor, terminal, or chat, rotate it before deployment. Never add `.env` files or database URLs to Vercel source/build settings; enter secrets only in Vercel's encrypted Environment Variables settings.
+## Database setup and migrations
 
-### PostgreSQL setup and migration safety
+- The application creates initial development schema and seed data only when
+  development `AUTO_CREATE_SCHEMA=1` is enabled.
+- Production startup verifies database connectivity but does not alter schema.
+- `database/schema.sql` contains destructive `DROP` statements. It is only for
+  a verified empty, disposable database; do not run it against an existing
+  installation.
+- For existing databases, back up, test upgrades in staging, and apply only
+  unapplied numbered SQL files in order.
+- The current fresh seed includes 18 ground-level parking bays. The deck
+  retirement migration preserves old slot rows and ticket history.
+- The explicit PostgreSQL migration/verification harness is
+  [scripts/postgres_harness.py](./scripts/postgres_harness.py). Read its safety
+  requirements in [migrations/README.md](./migrations/README.md) before use.
 
-`database/schema.sql` is a destructive fresh-database script. It is not an
-upgrade mechanism and must never be run against production or an existing
-database. Existing installations must use the ordered files in `migrations/`.
-Production startup does not run migrations.
+The test harness can apply migrations only to an explicitly supplied PostgreSQL
+database URL. Do not use a production or shared URL for its destructive `fresh`
+command.
 
-For an isolated PostgreSQL test database, use the explicit harness documented
-in [`migrations/README.md`](migrations/README.md). Set
-`SMARTPARK_TEST_DATABASE_URL` only in the shell running the test, verify the
-reported database identity, and set `SMARTPARK_DISPOSABLE_DB=1` only for a
-database that can be destroyed. The harness records applied files in
-`smartpark_migrations`, stops on SQL errors, and never prints the connection
-URL. Do not use a production or shared Supabase URL for `fresh`.
+## Vercel deployment
 
-`SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are server-side project configuration values. Automatic table creation specifically requires the PostgreSQL connection string in `SUPABASE_DB_URL`; Supabase API keys alone cannot run PostgreSQL DDL.
+The repository is configured for one Vercel project:
 
-### 7. Running with Docker (Optional)
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY backend/ .
-COPY frontend/ ../frontend/
-ENV FLASK_ENV=production FLASK_DEBUG=0
-EXPOSE 5000
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "wsgi:app"]
+- `.python-version` selects Python 3.12.
+- `api/index.py` loads the Flask WSGI application.
+- `vercel.json` sends API and authenticated page requests to the Python
+  function and serves static frontend files separately.
+- Persistent application state must use PostgreSQL; Vercel function storage is
+  not a persistent database.
+
+Deployment checklist:
+
+1. Import the repository root into Vercel. Use the checked-in `vercel.json`
+   routing and keep the repository root as the project root.
+2. Set Vercel Production and Preview environment variables as needed:
+   `FLASK_ENV=production`, `FLASK_DEBUG=0`, `AUTO_CREATE_SCHEMA=0`,
+   `SESSION_COOKIE_SECURE=1`, strong `FLASK_SECRET_KEY`, `ADMIN_USERNAME`,
+   strong `ADMIN_PASSWORD`, and `SUPABASE_DB_URL` (or `DATABASE_URL`).
+3. Prepare the database using the process in
+   [Database setup and migrations](#database-setup-and-migrations). Never run
+   destructive schema setup on an existing database.
+4. Deploy a Preview first. Verify portal routes, customer and admin
+   authentication, `/api/status`, `/api/slots`, and a database-backed workflow.
+5. Promote only after the Preview works with the configured production-like
+   database and secrets.
+
+Vercel may show that dashboard Build and Development Settings are ignored when
+`builds` is present in `vercel.json`. This is informational; the checked-in
+configuration controls those builds. Deployment completion alone does not
+prove runtime database connectivity or successful login; test the deployed
+Preview.
+
+## Tests and checks
+
+Install root dependencies, activate the virtual environment, and run from the
+repository root:
+
+```bash
+pytest -q
+python -m compileall -q backend api scripts
+git diff --check
 ```
 
-### ⚠️ Important Security Notes
-- **Always** configure strong, unique `FLASK_SECRET_KEY` and `ADMIN_PASSWORD` values before production
-- **Never** commit `.env` files to version control (already excluded by `.gitignore`)
-- Use a strong, random `FLASK_SECRET_KEY` — generate with `python -c "import secrets; print(secrets.token_hex(32))"`
-- For a separate frontend/backend deployment, configure the frontend's `/api` proxy to point at the backend service and set CORS for the frontend origin.
+The tests use in-memory SQLite and do not validate PostgreSQL row-locking
+behavior. PostgreSQL migration checks require a separate explicitly configured
+disposable database and must follow [migrations/README.md](./migrations/README.md).
 
----
+## Limitations and security notes
 
-## 🖥️ Web Portals & Usage
+- The payment workflow is a simulation, not a payment gateway; it must not be
+  represented as real financial processing.
+- ANPR is prototype/demo behavior, not production optical character
+  recognition.
+- This is a software-only system. Legacy hardware webhook routes return
+  `410 Gone`; no physical barrier, sensor, or ESP32 firmware is part of the
+  active application.
+- Vercel functions are stateless. Keep sessions signed with a stable secret
+  across deployments and store all durable operational data in PostgreSQL.
+- Never commit `.env` files, database URLs, passwords, secret keys, or user data.
+  Configure deployment secrets in Vercel Environment Variables.
+- Rotate any credential that was displayed or shared outside its intended
+  secret store.
+- Admin and customer sessions are separate. Admin APIs require the configured
+  admin session, and state-changing protected requests require CSRF validation.
+- Keep production `FLASK_DEBUG=0`, `AUTO_CREATE_SCHEMA=0`, and secure cookies
+  enabled.
 
-SMARTPARK exposes two separate web experiences over the same Flask API and
-Supabase database:
+## Demonstration flow
 
-| Interface | Routes | Authentication | Scope |
-| :--- | :--- | :--- | :--- |
-| Customer website | `/customer`, `/booking`, `/payment` | Optional customer account via `/customer/login` and `/customer/register` | Availability, booking, QR pass, billing, demo payment, and exit |
-| Admin website | `/admin`, `/admin/login`, `/admin/scanner` | Server-side administrator session, CSRF, role check, and database-backed rate limiting | Operations, real database analytics, QR scanning, and audit history |
+1. Open `/booking` and reserve a compatible available slot.
+2. Display the returned ticket and QR pass.
+3. Sign in at `/admin/login`, open `/admin/scanner`, and scan or enter the
+   booking token to validate/check in the reservation.
+4. Confirm the bay moves from reserved to occupied on `/parking` and in the
+   admin dashboard.
+5. Look up the ticket at `/payment` and view the active-session estimate.
+6. Use a development payment method and confirm the UI marks the session
+   complete, records a simulated payment, and releases the bay.
+7. Sign in as the customer (when the reservation belongs to a registered
+   account) and review the booking in customer history.
 
-Customer sessions are stored separately from administrator sessions. Admin APIs
-require an authenticated session whose role is `ADMIN`; changing a URL or
-hiding a button does not grant access. The customer registration flow creates
-only `CUSTOMER` accounts and cannot access admin endpoints.
+## License
 
-| Page | URL | Purpose |
-| :--- | :--- | :--- |
-| **Live Availability** | `http://localhost:5000/index.html` | Real-time 2D parking lot visualizer & tariffs |
-| **Slot Booking** | `http://localhost:5000/booking.html` | Pre-book a slot & download instant QR entry pass |
-| **Pay & Checkout** | `http://localhost:5000/payment.html` | Lookup ticket, calculate dynamic fees, and use the clearly labelled development payment workflow |
-| **Admin Console** | `http://localhost:5000/admin` | Software-only dashboard for QR scanning, booked entry, walk-in allocation, payment, exit, active parking, and history |
-
----
-
-## 💡 How to Demonstrate in a Viva / College Presentation
-
-1. **Demonstrate the software-only flow**:
-   - Open `/admin` and sign in.
-   - Create a public booking from `/booking`, then keep its QR pass open.
-   - In Admin, open **QR Scanner**, click **Start Scanner**, or enter the token manually.
-   - Scan the QR at `/admin/scanner`; the first scan authorizes entry and allocates the reserved slot.
-   - Use the payment page for the clearly labelled development payment workflow; successful server-side payment completes exit and releases the slot.
-   - Confirm the bay is available again and the completed session remains in **History**.
-2. **Demonstrate Real-Time Grid Updates**:
-   - Open `index.html` in a second browser window.
-   - Notice that slot `A-01` turned **RED (Occupied)** with the vehicle plate displayed in real-time.
-3. **Demonstrate Dynamic Pricing & Payment**:
-   - Open `payment.html`, type `KA-01-MJ-5021` or click the payment link.
-   - Point out the itemized fare breakdown: Base Rate + Additional Hours + Peak Surge (1.25x if between 9-11 AM or 5-8 PM) + GST.
-   - Select a development payment method. No real financial provider is integrated and no money is transferred.
-4. **Demonstrate software exit release**:
-   - After payment, open the Admin **Active Parking** section and click **Complete Paid Exit & Release Bay**.
-   - The session is completed and the allocated bay turns back to **GREEN (Available)**.
-5. **Demonstrate One-Click Reset**:
-   - Click **"🔄 Reset Demo"** to restore all slots to available for the next reviewer.
-
----
-
-## 🛡️ License
-Academic & Educational Use Only. Built for demonstration and portfolio showcasing.
+The project is intended for academic and educational demonstration and
+portfolio presentation. Confirm applicable third-party dependency and map-tile
+provider terms before redistribution or commercial use.
