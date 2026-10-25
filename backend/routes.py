@@ -17,18 +17,28 @@ import qrcode
 from config import Config
 import database
 from database import (
-    ParkingSlot, Ticket, GateLog, SensorTelemetry, User, SystemConfig, LoginAttempt,
+    ParkingSlot, Ticket, GateLog, SensorTelemetry, User, Vehicle, SystemConfig, LoginAttempt,
     get_db
 )
 from services import (
     SlotAllocationService, ANPRService, BillingService,
-    IoTGatewayService, facility_graph, utc_naive
+    IoTGatewayService, facility_graph, utc_naive, ist_naive_to_utc, IST
 )
 
 api = Blueprint("api", __name__, url_prefix="/api")
 logger = logging.getLogger("smartpark.routes")
 LOGIN_WINDOW = datetime.timedelta(minutes=15)
 LOGIN_FAILURE_LIMIT = 5
+REGISTRATION_RE = re.compile(r"^[A-Z]{2}-\d{2}-[A-Z]{2}-[A-Z0-9]{4}$")
+
+
+def normalize_registration_number(raw_value):
+    """Normalize Indian registration input to AA-00-AA-0000 or reject it."""
+    raw = str(raw_value or "").strip().upper()
+    compact = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(compact) == 10 and re.fullmatch(r"[A-Z]{2}\d{2}[A-Z]{2}[A-Z0-9]{4}", compact):
+        raw = f"{compact[:2]}-{compact[2:4]}-{compact[4:6]}-{compact[6:]}"
+    return raw if REGISTRATION_RE.fullmatch(raw) else None
 ADMIN_LOGIN_FAILURE_LIMIT = 15
 
 
@@ -86,6 +96,8 @@ def admin_required(route_handler):
 def customer_csrf_required(route_handler):
     @wraps(route_handler)
     def wrapped(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return route_handler(*args, **kwargs)
         if not session.get("customer_user"):
             return jsonify({"success": False, "error": "Customer login required"}), 401
         supplied = request.headers.get("X-CSRF-Token", "")
@@ -99,6 +111,8 @@ def customer_csrf_required(route_handler):
 def customer_required(route_handler):
     @wraps(route_handler)
     def wrapped(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return route_handler(*args, **kwargs)
         if not session.get("customer_user"):
             return jsonify({"success": False, "error": "Customer login required"}), 401
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
@@ -250,10 +264,10 @@ def customer_profile():
             flask_session.clear()
             return jsonify({"success": False, "error": "Customer account is no longer available."}), 401
         if request.method == "GET":
-            return jsonify({"success": True, "user": user.to_dict()})
+            return jsonify({"success": True, "user": user.to_dict(), "vehicles": [v.to_dict() for v in user.vehicles]})
 
         data = request.get_json(silent=True) or {}
-        raw_username = data.get("username")
+        raw_username = data.get("username", user.username)
         if not isinstance(raw_username, str):
             return jsonify({"success": False, "error": "Username is required."}), 400
         username = raw_username.strip().lower()
@@ -263,6 +277,12 @@ def customer_profile():
         if duplicate:
             return jsonify({"success": False, "error": "That username is already in use."}), 409
         user.username = username
+        for field in ("full_name", "email", "phone"):
+            if field in data:
+                value = str(data[field] or "").strip() or None
+                if field == "full_name" and (not value or len(value) > 100):
+                    return jsonify({"success": False, "error": "Full name is required and must be 100 characters or fewer."}), 400
+                setattr(user, field, value)
         session_db.commit()
         flask_session["customer_user"] = {"id": user.id, "username": user.username, "full_name": user.full_name, "role": "CUSTOMER"}
         return jsonify({"success": True, "user": user.to_dict()})
@@ -271,6 +291,73 @@ def customer_profile():
         return jsonify({"success": False, "error": "That username is already in use."}), 409
     finally:
         session_db.close()
+
+
+def _current_customer(session_db):
+    customer_id = flask_session.get("customer_user", {}).get("id")
+    return session_db.query(User).filter_by(id=customer_id, role="CUSTOMER").first()
+
+
+@api.route("/customer/vehicles", methods=["GET", "POST", "OPTIONS"])
+@customer_required
+def customer_vehicles():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    db = database.SessionLocal()
+    try:
+        user = _current_customer(db)
+        if not user: return jsonify({"success": False, "error": "Customer account unavailable."}), 401
+        if request.method == "GET": return jsonify({"success": True, "vehicles": [v.to_dict() for v in user.vehicles]})
+        data = request.get_json(silent=True) or {}
+        number = normalize_registration_number(data.get("vehicle_number") or data.get("registration_number", ""))
+        kind = str(data.get("vehicle_type", "COMPACT")).upper()
+        nickname = str(data.get("nickname", "")).strip()[:50] or None
+        if not number or kind not in Config.RATES: return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
+        if db.query(Vehicle).filter_by(user_id=user.id, vehicle_number=number).first(): return jsonify({"success": False, "error": "This vehicle is already saved."}), 409
+        vehicle = Vehicle(user_id=user.id, vehicle_number=number, vehicle_type=kind, nickname=nickname)
+        db.add(vehicle); db.commit()
+        return jsonify({"success": True, "vehicle": vehicle.to_dict()}), 201
+    except IntegrityError:
+        db.rollback(); return jsonify({"success": False, "error": "This vehicle is already saved."}), 409
+    finally: db.close()
+
+
+@api.route("/customer/vehicles/<int:vehicle_id>", methods=["PUT", "DELETE", "OPTIONS"])
+@customer_csrf_required
+def customer_vehicle_detail(vehicle_id):
+    if request.method == "OPTIONS":
+        return ("", 204)
+    db = database.SessionLocal()
+    try:
+        user_id = flask_session["customer_user"]["id"]
+        vehicle = db.query(Vehicle).filter_by(id=vehicle_id, user_id=user_id).first()
+        if not vehicle: return jsonify({"success": False, "error": "Vehicle not found."}), 404
+        if request.method == "DELETE": db.delete(vehicle); db.commit(); return jsonify({"success": True})
+        data = request.get_json(silent=True) or {}
+        if "vehicle_number" in data or "registration_number" in data:
+            vehicle.vehicle_number = normalize_registration_number(data.get("vehicle_number") or data.get("registration_number"))
+        if "vehicle_type" in data and str(data["vehicle_type"]).upper() in Config.RATES: vehicle.vehicle_type = str(data["vehicle_type"]).upper()
+        if "nickname" in data: vehicle.nickname = str(data["nickname"] or "").strip()[:50] or None
+        if not vehicle.vehicle_number: return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
+        db.commit(); return jsonify({"success": True, "vehicle": vehicle.to_dict()})
+    except IntegrityError:
+        db.rollback(); return jsonify({"success": False, "error": "This vehicle is already saved."}), 409
+    finally: db.close()
+
+
+@api.route("/customer/account", methods=["DELETE"])
+@customer_csrf_required
+def delete_customer_account():
+    db = database.SessionLocal()
+    try:
+        user = _current_customer(db); password = str((request.get_json(silent=True) or {}).get("password", ""))
+        if not user or not check_password_hash(user.password_hash, password): return jsonify({"success": False, "error": "Password confirmation failed."}), 403
+        db.query(Ticket).filter_by(user_id=user.id).update({"user_id": None}, synchronize_session=False)
+        db.delete(user); db.commit(); flask_session.clear()
+        return jsonify({"success": True, "message": "Customer account deleted. Historical parking records were preserved."})
+    except Exception:
+        db.rollback(); logger.exception("Customer account deletion failed"); return jsonify({"success": False, "error": "Unable to delete account."}), 500
+    finally: db.close()
 
 
 @api.route("/customer/history", methods=["GET"])
@@ -296,6 +383,10 @@ def customer_history():
                 "slot_number": ticket.slot.slot_number if ticket.slot else None,
                 "entry_time": ticket.entry_time.isoformat() if ticket.entry_time else None,
                 "payment_status": ticket.payment_status,
+                "payment_scan_ready": bool(session_db.query(GateLog).filter(
+                    GateLog.gate_type == "ENTRY",
+                    GateLog.notes.like(f"Second QR scan accepted for ticket {ticket.ticket_code}%")
+                ).first()),
             } for ticket in tickets if ticket.status == "ACTIVE" and not ticket.exit_time and
                 not _qr_token_expired(ticket.qr_expires_at, now_utc)],
             "payments": [{"ticket_code": ticket.ticket_code, "vehicle_number": ticket.vehicle_number,
@@ -315,9 +406,9 @@ def customer_walk_in():
     try:
         data = request.get_json(silent=True) or {}
         vehicle_type = str(data.get("vehicle_type", "COMPACT")).upper()
-        vehicle_number = ANPRService.clean_plate_number(data.get("vehicle_number", ""))
+        vehicle_number = normalize_registration_number(data.get("vehicle_number", ""))
         if not vehicle_number:
-            return jsonify({"success": False, "error": "Vehicle number is required."}), 400
+            return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
         if vehicle_type not in Config.RATES:
             return jsonify({"success": False, "error": "Unsupported vehicle type."}), 400
         existing = session_db.query(Ticket).filter_by(vehicle_number=vehicle_number, status="ACTIVE").first()
@@ -396,7 +487,7 @@ def _qr_token_expired(expires_at, now):
     return expires_at_utc is not None and expires_at_utc <= now_utc
 
 
-def _qr_ticket_details(ticket):
+def _qr_ticket_details(ticket, session_db):
     """Return scanner-safe booking/session data without exposing secrets."""
     slot = ticket.slot
     user = ticket.user
@@ -407,6 +498,10 @@ def _qr_ticket_details(ticket):
     else:
         entry_status = "NOT_ENTERED"
 
+    scan_count = 2 if session_db.query(GateLog).filter(
+        GateLog.gate_type == "ENTRY",
+        GateLog.notes.like(f"Second QR scan accepted for ticket {ticket.ticket_code}%")
+    ).first() else (1 if ticket.entry_time else 0)
     return {
         "booking_id": ticket.ticket_code,
         "vehicle_number": ticket.vehicle_number,
@@ -423,6 +518,8 @@ def _qr_ticket_details(ticket):
         "entry_time": ticket.entry_time.isoformat() if entry_status != "NOT_ENTERED" and ticket.entry_time else None,
         "exit_time": ticket.exit_time.isoformat() if ticket.exit_time else None,
         "payment_status": ticket.payment_status,
+        "payment_scan_ready": bool(ticket.entry_time and scan_count >= 2),
+        "scan_count": scan_count,
         "ticket": ticket.to_dict()
     }
 
@@ -446,7 +543,7 @@ def scan_admin_qr():
         if ticket.qr_revoked_at or _qr_token_expired(ticket.qr_expires_at, now):
             return jsonify({"success": False, "error": "This QR token has expired or been revoked."}), 410
 
-        details = _qr_ticket_details(ticket)
+        details = _qr_ticket_details(ticket, session_db)
         if ticket.status != "ACTIVE":
             return jsonify({
                 "success": False,
@@ -485,12 +582,22 @@ def scan_admin_qr_entry():
             }, session_db, use_hardware=False)
             return jsonify(response), status
 
-        details = _qr_ticket_details(ticket)
+        details = _qr_ticket_details(ticket, session_db)
+        session_db.add(GateLog(
+            gate_type="ENTRY",
+            vehicle_number=ticket.vehicle_number,
+            trigger_source="API",
+            action_taken="GATE_OPENED",
+            notes=f"Second QR scan accepted for ticket {ticket.ticket_code} at slot {ticket.slot.slot_number if ticket.slot else 'N/A'}"
+        ))
+        session_db.commit()
+        details = _qr_ticket_details(ticket, session_db)
         return jsonify({
             "success": True,
             "message": "Active parking session found.",
             "scan_stage": "EXIT_CHECK",
             "next_action": "PAYMENT_REQUIRED" if ticket.payment_status not in ("PAID", "EXEMPT") else "EXIT_AUTHORIZATION",
+            "payment_url": f"/payment?ticket={ticket.ticket_code}" if ticket.payment_status not in ("PAID", "EXEMPT") else None,
             "booking": details
         })
     except Exception:
@@ -642,10 +749,10 @@ def edit_admin_parking(slot_id):
         vehicle_number = None
         if "vehicle_number" in data:
             if not isinstance(data["vehicle_number"], str):
-                return jsonify({"success": False, "error": "Enter a valid vehicle number using 3-25 letters or numbers."}), 400
-            vehicle_number = ANPRService.clean_plate_number(data["vehicle_number"].strip())
-            if not 3 <= len(vehicle_number) <= 25 or not vehicle_number.replace("-", "").isalnum():
-                return jsonify({"success": False, "error": "Enter a valid vehicle number using 3-25 letters or numbers."}), 400
+                return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
+            vehicle_number = normalize_registration_number(data["vehicle_number"])
+            if not vehicle_number:
+                return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
         slot_type = None
         if "slot_type" in data:
             if not isinstance(data["slot_type"], str):
@@ -753,7 +860,7 @@ def reserve_slot():
     try:
         data = request.get_json() or {}
         vehicle_type = data.get("vehicle_type", "COMPACT").upper()
-        vehicle_number = ANPRService.clean_plate_number(data.get("vehicle_number", ""))
+        vehicle_number = normalize_registration_number(data.get("vehicle_number", ""))
         slot_number = data.get("slot_number")
         booking_time_value = data.get("booking_time")
 
@@ -761,8 +868,7 @@ def reserve_slot():
         if booking_time_value:
             try:
                 booking_time = datetime.datetime.fromisoformat(str(booking_time_value).replace("Z", "+00:00"))
-                if booking_time.tzinfo:
-                    booking_time = booking_time.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                booking_time = ist_naive_to_utc(booking_time)
             except ValueError:
                 return jsonify({"success": False, "error": "Booking time must be a valid date and time"}), 400
             if booking_time < now_utc - datetime.timedelta(minutes=15):
@@ -771,7 +877,7 @@ def reserve_slot():
             booking_time = now_utc
 
         if not vehicle_number:
-            return jsonify({"success": False, "error": "Vehicle number is required for booking"}), 400
+            return jsonify({"success": False, "error": "Invalid registration number. Use AA-00-AA-0000."}), 400
 
         # Check if vehicle already has an active ticket/booking
         existing = session.query(Ticket).filter(
@@ -779,7 +885,10 @@ def reserve_slot():
             Ticket.status.in_(["ACTIVE"])
         ).first()
         if existing:
-            return jsonify({"success": False, "error": f"Vehicle {vehicle_number} already has an active session!"}), 409
+            return jsonify({
+                "success": False,
+                "error": "This vehicle already has an active booking or parking session. Check My Bookings before trying again."
+            }), 409
 
         if slot_number:
             slot = session.query(ParkingSlot).filter(
@@ -849,7 +958,7 @@ def _recognize_vehicle(data):
     provided_plate = data.get("vehicle_number")
     if provided_plate and str(provided_plate).strip():
         return {
-            "plate_number": ANPRService.clean_plate_number(str(provided_plate).strip()),
+            "plate_number": normalize_registration_number(provided_plate),
             "confidence": 99.0,
             "is_synthetic": True,
             "method": "MANUAL_INPUT"
@@ -1017,9 +1126,10 @@ def get_ticket_details(identifier):
             Ticket.status.in_(("ACTIVE", "COMPLETED"))
         )
         customer = flask_session.get("customer_user")
+        admin = flask_session.get("admin_user")
         if customer:
             ticket_query = ticket_query.filter(Ticket.user_id == customer.get("id"))
-        else:
+        elif not admin:
             ticket_query = ticket_query.filter(Ticket.user_id.is_(None))
         ticket = ticket_query.order_by(Ticket.created_at.desc()).first()
 
@@ -1051,6 +1161,12 @@ def get_ticket_details(identifier):
             "COMPLETED" if ticket.status == "COMPLETED"
             else "UPCOMING / NOT_CHECKED_IN" if not ticket.entry_time
             else "ACTIVE / CHECKED_IN"
+        )
+        response_data["payment_scan_ready"] = bool(
+            ticket.entry_time and session.query(GateLog).filter(
+                GateLog.gate_type == "ENTRY",
+                GateLog.notes.like(f"Second QR scan accepted for ticket {ticket.ticket_code}%")
+            ).first()
         )
         response_data["scheduled_end_time"] = ticket.qr_expires_at.isoformat() if ticket.qr_expires_at else None
         return jsonify({"success": True, "ticket": response_data})
@@ -1101,7 +1217,13 @@ def process_payment():
     session = database.SessionLocal()
     try:
         customer = flask_session.get("customer_user")
+        admin = flask_session.get("admin_user")
         if customer:
+            supplied_csrf = request.headers.get("X-CSRF-Token", "")
+            expected_csrf = flask_session.get("csrf_token", "")
+            if not expected_csrf or not secrets.compare_digest(supplied_csrf, expected_csrf):
+                return jsonify({"success": False, "error": "CSRF validation failed"}), 403
+        elif admin:
             supplied_csrf = request.headers.get("X-CSRF-Token", "")
             expected_csrf = flask_session.get("csrf_token", "")
             if not expected_csrf or not secrets.compare_digest(supplied_csrf, expected_csrf):
@@ -1127,7 +1249,7 @@ def process_payment():
         if not ticket:
             session.commit()
             return jsonify({"success": False, "error": "Active ticket not found"}), 404
-        if ticket.user_id is not None and (
+        if ticket.user_id is not None and not admin and (
             not customer or ticket.user_id != customer.get("id")
         ):
             return jsonify({"success": False, "error": "This ticket does not belong to the signed-in customer."}), 404
@@ -1135,7 +1257,7 @@ def process_payment():
         ticket = session.query(Ticket).filter_by(ticket_code=ticket_code).with_for_update().populate_existing().first()
         if not ticket:
             return jsonify({"success": False, "error": "Active ticket not found"}), 404
-        if ticket.user_id is not None and (
+        if ticket.user_id is not None and not admin and (
             not customer or ticket.user_id != customer.get("id")
         ):
             return jsonify({"success": False, "error": "This ticket does not belong to the signed-in customer."}), 404
@@ -1163,6 +1285,14 @@ def process_payment():
         if not ticket.entry_time:
             return jsonify({"success": False, "error": "The booking must be checked in before payment."}), 409
 
+        second_scan = session.query(GateLog).filter(
+            GateLog.gate_type == "ENTRY",
+            GateLog.notes.like(f"Second QR scan accepted for ticket {ticket.ticket_code}%")
+        ).first()
+        scan_count = 2 if second_scan else (1 if ticket.entry_time else 0)
+        if scan_count < 2:
+            return jsonify({"success": False, "error": "Scan the QR ticket a second time at the exit scanner before payment."}), 409
+
         if ticket.payment_status == "PAID":
             return jsonify({"success": False, "error": "Payment is recorded but the parking session is not completed."}), 409
 
@@ -1172,6 +1302,20 @@ def process_payment():
 
         exit_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
         bill = BillingService.calculate_bill(ticket.entry_time, exit_time, ticket.vehicle_type)
+
+        if payment_method == "CASH":
+            ticket.payment_method = "CASH"
+            ticket.total_amount = bill["grand_total"]
+            ticket.duration_minutes = bill["duration_minutes"]
+            session.commit()
+            return jsonify({
+                "success": True,
+                "cash_pending": True,
+                "message": "Cash payment requested. An administrator must confirm cash received before exit.",
+                "payment_status": "PENDING",
+                "amount_due": bill["grand_total"],
+                "ticket_code": ticket.ticket_code
+            }), 202
 
         txn_id = f"TXN_{payment_method}_{uuid.uuid4().hex[:10].upper()}"
         ticket.payment_status = "PAID"
@@ -1216,6 +1360,71 @@ def process_payment():
         return jsonify({"success": False, "error": "Payment could not be completed; the parking session remains active."}), 500
     finally:
         session.close()
+
+
+@api.route("/admin/payment/release-cash", methods=["POST"])
+@admin_required
+def release_cash_payment():
+    """Admin-only confirmation for cash received at the exit desk."""
+    db = database.SessionLocal()
+    try:
+        data = request.get_json(silent=True) or {}
+        code = normalize_token(data.get("ticket_code"))
+        ticket = db.query(Ticket).filter_by(ticket_code=code).with_for_update().first()
+        if not ticket or ticket.status != "ACTIVE":
+            return jsonify({"success": False, "error": "Active ticket not found."}), 404
+        if ticket.payment_method != "CASH" or ticket.payment_status != "PENDING":
+            return jsonify({"success": False, "error": "This ticket is not awaiting cash confirmation."}), 409
+        if not ticket.entry_time:
+            return jsonify({"success": False, "error": "The vehicle has not been checked in."}), 409
+        slot = db.query(ParkingSlot).filter_by(id=ticket.slot_id).with_for_update().first()
+        if not slot or slot.status != "OCCUPIED" or slot.active_vehicle_number != ticket.vehicle_number:
+            return jsonify({"success": False, "error": "The occupied slot could not be verified."}), 409
+        exit_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        bill = BillingService.calculate_bill(ticket.entry_time, exit_time, ticket.vehicle_type)
+        ticket.payment_status = "PAID"
+        ticket.transaction_id = f"CASH_{uuid.uuid4().hex[:10].upper()}"
+        ticket.total_amount = bill["grand_total"]
+        ticket.duration_minutes = bill["duration_minutes"]
+        ticket.exit_time = exit_time
+        ticket.status = "COMPLETED"
+        _release_parking_slot(slot, exit_time)
+        db.add(GateLog(gate_type="EXIT", vehicle_number=ticket.vehicle_number, trigger_source="API", action_taken="GATE_OPENED", notes=f"Admin confirmed cash and released slot {slot.slot_number}"))
+        db.commit()
+        return jsonify({"success": True, "message": "Cash confirmed; exit completed and slot released.", "ticket": ticket.to_dict()})
+    except Exception:
+        db.rollback()
+        logger.exception("Cash release failed")
+        return jsonify({"success": False, "error": "Cash release failed; the session remains active."}), 500
+    finally:
+        db.close()
+
+
+@api.route("/admin/payment/cash-pending", methods=["GET"])
+@admin_required
+def pending_cash_payments():
+    """List active sessions for which a customer requested cash payment."""
+    db = database.SessionLocal()
+    try:
+        tickets = db.query(Ticket).filter(
+            Ticket.status == "ACTIVE",
+            Ticket.entry_time.isnot(None),
+            Ticket.payment_method == "CASH",
+            Ticket.payment_status == "PENDING"
+        ).order_by(Ticket.entry_time.asc()).all()
+        return jsonify({
+            "success": True,
+            "payments": [{
+                "ticket_code": ticket.ticket_code,
+                "vehicle_number": ticket.vehicle_number,
+                "vehicle_type": ticket.vehicle_type,
+                "slot_number": ticket.slot.slot_number if ticket.slot else None,
+                "amount_due": float(ticket.total_amount),
+                "entry_time": ticket.entry_time.isoformat(),
+            } for ticket in tickets]
+        })
+    finally:
+        db.close()
 
 
 def _find_active_ticket(session_db, identifier):
@@ -1354,8 +1563,10 @@ def get_analytics():
     """Dashboard analytics: occupancy, revenue, zone utilization, and logs."""
     session = database.SessionLocal()
     try:
-        now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
-        today_start = datetime.datetime(now.year, now.month, now.day)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today_ist = now.astimezone(IST).date()
+        today_start = datetime.datetime.combine(today_ist, datetime.time.min, tzinfo=IST)
+        today_start = today_start.astimezone(datetime.timezone.utc).replace(tzinfo=None)
 
         active_inventory = ParkingSlot.floor_level == 0
         total_slots = session.query(ParkingSlot).filter(active_inventory).count()

@@ -24,10 +24,10 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import create_app, _session_cookie_secure
 import database
-from database import init_db, ParkingSlot, Ticket, User, SystemConfig, LoginAttempt, GateLog
+from database import init_db, ParkingSlot, Ticket, User, Vehicle, SystemConfig, LoginAttempt, GateLog
 from services import (
     SlotAllocationService, ANPRService, BillingService,
-    IoTGatewayService, facility_graph
+    IoTGatewayService, facility_graph, IST, ist_naive_to_utc
 )
 from config import Config
 from routes import _qr_token_expired
@@ -84,6 +84,35 @@ class SmartParkTestCase(unittest.TestCase):
             (now - datetime.timedelta(minutes=1)).replace(tzinfo=datetime.timezone.utc),
             now
         ))
+
+    def test_ist_booking_times_and_peak_hours_use_india_timezone(self):
+        local_booking_time = datetime.datetime(2026, 10, 25, 15, 30)
+        self.assertEqual(
+            ist_naive_to_utc(local_booking_time),
+            datetime.datetime(2026, 10, 25, 10, 0)
+        )
+        self.assertEqual(
+            ist_naive_to_utc(local_booking_time.replace(tzinfo=IST)),
+            datetime.datetime(2026, 10, 25, 10, 0)
+        )
+        self.assertTrue(BillingService.is_peak_hour(datetime.datetime(2026, 10, 25, 12, 0)))
+        self.assertFalse(BillingService.is_peak_hour(datetime.datetime(2026, 10, 25, 3, 0)))
+
+    def test_naive_reservation_time_is_interpreted_as_ist(self):
+        suffix = uuid.uuid4().hex[:4].upper()
+        local_booking_time = (
+            datetime.datetime.now(IST).replace(tzinfo=None) + datetime.timedelta(hours=1)
+        ).replace(second=0, microsecond=0)
+        response = self.client.post("/api/slots/reserve", json={
+            "vehicle_number": f"KA-08-IS-{suffix}",
+            "booking_time": local_booking_time.isoformat(timespec="minutes"),
+        })
+        self.assertEqual(response.status_code, 200)
+        ticket = response.get_json()["ticket"]
+        with database.SessionLocal() as session:
+            stored = session.query(Ticket).filter_by(ticket_code=ticket["ticket_code"]).one()
+            expected_utc = local_booking_time.replace(tzinfo=IST).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            self.assertEqual(stored.booking_time, expected_utc)
 
     def test_dijkstra_graph_navigation(self):
         """Test Dijkstra's algorithm for finding shortest path and turn-by-turn guidance."""
@@ -222,16 +251,18 @@ class SmartParkTestCase(unittest.TestCase):
 
         # Reservations are not billable until the vehicle is checked in.
         self.assertIsNone(ticket["entry_time"])
-        rejected = self.client.post("/api/payment/process", json={"ticket_code": ticket_code})
-        self.assertEqual(rejected.status_code, 409)
-        self.assertEqual(ticket["payment_status"], "PENDING")
         login = self.client.post("/api/admin/login", json={
             "username": Config.ADMIN_USERNAME, "password": Config.ADMIN_PASSWORD
         })
         csrf = login.headers["X-CSRF-Token"]
+        rejected = self.client.post("/api/payment/process", json={"ticket_code": ticket_code}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(rejected.status_code, 409)
+        self.assertEqual(ticket["payment_status"], "PENDING")
         entry = self.client.post("/api/admin/qr/scan-entry", json={"token": ticket_code}, headers={"X-CSRF-Token": csrf})
         self.assertEqual(entry.status_code, 200)
         self.assertIsNotNone(entry.get_json()["ticket"]["entry_time"])
+        second_scan = self.client.post("/api/admin/qr/scan-entry", json={"token": ticket_code}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(second_scan.status_code, 200)
         slot_session = database.SessionLocal()
         try:
             slot = slot_session.query(ParkingSlot).filter_by(id=ticket["slot_id"]).first()
@@ -250,7 +281,7 @@ class SmartParkTestCase(unittest.TestCase):
         # 3. Pay ticket
         failed = self.client.post("/api/payment/process", json={
             "ticket_code": ticket_code, "payment_method": "NOT_SUPPORTED"
-        })
+        }, headers={"X-CSRF-Token": csrf})
         self.assertEqual(failed.status_code, 400)
         active_session = database.SessionLocal()
         try:
@@ -264,7 +295,7 @@ class SmartParkTestCase(unittest.TestCase):
         res = self.client.post("/api/payment/process", json={
             "ticket_code": ticket_code,
             "payment_method": "UPI_QR"
-        })
+        }, headers={"X-CSRF-Token": csrf})
         self.assertEqual(res.status_code, 200)
         pay_data = res.get_json()
         self.assertTrue(pay_data["success"])
@@ -293,7 +324,7 @@ class SmartParkTestCase(unittest.TestCase):
         duplicate = self.client.post("/api/payment/process", json={
             "ticket_code": ticket_code,
             "payment_method": "UPI_QR"
-        })
+        }, headers={"X-CSRF-Token": csrf})
         self.assertEqual(duplicate.status_code, 200)
         self.assertTrue(duplicate.get_json()["duplicate"])
         final_details = self.client.get(f"/api/tickets/{ticket_code}")
@@ -312,7 +343,7 @@ class SmartParkTestCase(unittest.TestCase):
         invalid_method = self.client.post("/api/payment/process", json={
             "ticket_code": ticket_code,
             "payment_method": "FORGED_GATEWAY"
-        })
+        }, headers={"X-CSRF-Token": csrf})
         self.assertEqual(invalid_method.status_code, 400)
 
     def test_admin_authentication_and_simulation(self):
@@ -537,7 +568,9 @@ class SmartParkTestCase(unittest.TestCase):
         finally:
             persisted.close()
 
-        payment = admin.post("/api/payment/process", json={"ticket_code": ticket["ticket_code"]})
+        second_scan = admin.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers=headers)
+        self.assertEqual(second_scan.status_code, 200)
+        payment = admin.post("/api/payment/process", json={"ticket_code": ticket["ticket_code"]}, headers=headers)
         self.assertEqual(payment.status_code, 200)
 
     def test_admin_parking_edit_rejects_invalid_fields_and_unoccupied_slots(self):
@@ -558,7 +591,6 @@ class SmartParkTestCase(unittest.TestCase):
             headers=headers
         )
         self.assertEqual(entered.status_code, 200)
-
         invalid_type = admin.patch(
             f"/api/admin/slots/{ticket['slot_id']}/edit",
             json={"slot_type": "FLYING"},
@@ -606,7 +638,9 @@ class SmartParkTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 429)
 
     def test_booking_is_not_billable_until_single_use_qr_entry(self):
-        scheduled = (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(minutes=10)).isoformat()
+        scheduled = (
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
+        ).isoformat()
         response = self.client.post("/api/slots/reserve", json={
             "vehicle_number": "MH-12-PQ-8891",
             "vehicle_type": "COMPACT",
@@ -631,13 +665,13 @@ class SmartParkTestCase(unittest.TestCase):
             self.assertEqual(slot.status, "RESERVED")
         finally:
             slot_session.close()
-        pending = self.client.post("/api/payment/process", json={"ticket_code": ticket["ticket_code"]})
-        self.assertEqual(pending.status_code, 409)
-
         login = self.client.post("/api/admin/login", json={
             "username": Config.ADMIN_USERNAME, "password": Config.ADMIN_PASSWORD
         })
         csrf = login.headers["X-CSRF-Token"]
+        pending = self.client.post("/api/payment/process", json={"ticket_code": ticket["ticket_code"]}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(pending.status_code, 409)
+
         entered = self.client.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers={"X-CSRF-Token": csrf})
         self.assertEqual(entered.status_code, 200)
         replay = self.client.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers={"X-CSRF-Token": csrf})
@@ -667,6 +701,8 @@ class SmartParkTestCase(unittest.TestCase):
             headers={"X-CSRF-Token": admin_login.headers["X-CSRF-Token"]}
         )
         self.assertEqual(entered.status_code, 200)
+        second_scan = admin.post("/api/admin/qr/scan-entry", json={"token": code}, headers={"X-CSRF-Token": admin_login.headers["X-CSRF-Token"]})
+        self.assertEqual(second_scan.status_code, 200)
 
         guest = self.app.test_client()
         self.assertEqual(guest.get(f"/api/tickets/{code}").status_code, 404)
@@ -908,6 +944,94 @@ class SmartParkTestCase(unittest.TestCase):
         response = other.post(f"/api/customer/bookings/{code}/cancel", headers={"X-CSRF-Token": other_login.headers["X-CSRF-Token"]})
         self.assertEqual(response.status_code, 404)
 
+    def test_customer_saved_vehicles_crud_and_account_deletion_requires_password(self):
+        suffix = uuid.uuid4().hex[:8]
+        registered = self.client.post("/api/auth/register", json={"username": f"vehicle_{suffix}", "password": "vehicle-password-123", "full_name": "Vehicle User", "email": f"{suffix}@example.com"})
+        csrf = registered.headers["X-CSRF-Token"]
+        created = self.client.post("/api/customer/vehicles", json={"vehicle_number": f"KA-05-VH-{suffix[:4]}", "vehicle_type": "SUV", "nickname": "Family SUV"}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(created.status_code, 201)
+        vehicle = created.get_json()["vehicle"]
+        listed = self.client.get("/api/customer/vehicles")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.get_json()["vehicles"][0]["nickname"], "Family SUV")
+        edited = self.client.put(f"/api/customer/vehicles/{vehicle['id']}", json={"nickname": "Updated SUV"}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(edited.status_code, 200)
+        self.assertEqual(edited.get_json()["vehicle"]["nickname"], "Updated SUV")
+        self.assertEqual(self.client.delete("/api/customer/account", json={"password": "wrong"}, headers={"X-CSRF-Token": csrf}).status_code, 403)
+        deleted = self.client.delete("/api/customer/account", json={"password": "vehicle-password-123"}, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
+
+    def test_second_qr_scan_opens_admin_payment_and_cash_confirmation_releases_slot(self):
+        suffix = uuid.uuid4().hex[:8]
+        owner = self.app.test_client()
+        registered = owner.post("/api/auth/register", json={
+            "username": f"cash_owner_{suffix}",
+            "password": "cash-owner-password-123",
+            "full_name": "Cash Owner",
+        })
+        self.assertEqual(registered.status_code, 201)
+        booking = owner.post("/api/slots/reserve", json={
+            "vehicle_number": f"KA-07-CH-{suffix[:4].upper()}",
+            "vehicle_type": "COMPACT",
+        })
+        self.assertEqual(booking.status_code, 200)
+        ticket = booking.get_json()["ticket"]
+
+        admin = self.app.test_client()
+        login = admin.post("/api/admin/login", json={
+            "username": Config.ADMIN_USERNAME,
+            "password": Config.ADMIN_PASSWORD,
+        })
+        csrf = login.headers["X-CSRF-Token"]
+        headers = {"X-CSRF-Token": csrf}
+        entry = admin.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers=headers)
+        self.assertEqual(entry.status_code, 200)
+        exit_scan = admin.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers=headers)
+        self.assertEqual(exit_scan.status_code, 200)
+        self.assertEqual(exit_scan.get_json()["payment_url"], f"/payment?ticket={ticket['ticket_code']}")
+
+        payment_page_ticket = admin.get(f"/api/tickets/{ticket['ticket_code']}")
+        self.assertEqual(payment_page_ticket.status_code, 200)
+        self.assertTrue(payment_page_ticket.get_json()["ticket"]["payment_scan_ready"])
+        requested = admin.post("/api/payment/process", json={
+            "ticket_code": ticket["ticket_code"],
+            "payment_method": "CASH",
+        }, headers=headers)
+        self.assertEqual(requested.status_code, 202)
+
+        pending = admin.get("/api/admin/payment/cash-pending")
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.get_json()["payments"][0]["ticket_code"], ticket["ticket_code"])
+        with database.SessionLocal() as session:
+            occupied_slot = session.query(ParkingSlot).filter_by(id=ticket["slot_id"]).one()
+            self.assertEqual(occupied_slot.status, "OCCUPIED")
+
+        confirmed = admin.post("/api/admin/payment/release-cash", json={
+            "ticket_code": ticket["ticket_code"],
+        }, headers=headers)
+        self.assertEqual(confirmed.status_code, 200)
+        self.assertEqual(confirmed.get_json()["ticket"]["status"], "COMPLETED")
+        with database.SessionLocal() as session:
+            released_slot = session.query(ParkingSlot).filter_by(id=ticket["slot_id"]).one()
+            self.assertEqual(released_slot.status, "AVAILABLE")
+
+    def test_reservation_conflict_explains_vehicle_has_active_booking(self):
+        suffix = uuid.uuid4().hex[:4].upper()
+        registered = self.client.post("/api/auth/register", json={
+            "username": f"active_vehicle_{suffix}",
+            "password": "active-vehicle-password-123",
+            "full_name": "Active Vehicle User",
+        })
+        self.assertEqual(registered.status_code, 201)
+        vehicle_number = f"KA-06-AV-{suffix}"
+        first = self.client.post("/api/slots/reserve", json={"vehicle_number": vehicle_number})
+        self.assertEqual(first.status_code, 200)
+
+        duplicate = self.client.post("/api/slots/reserve", json={"vehicle_number": vehicle_number})
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertIn("active booking or parking session", duplicate.get_json()["error"])
+
     def test_walk_in_creates_owned_qr_and_entry_starts_actual_session(self):
         suffix = uuid.uuid4().hex[:8]
         registered = self.client.post("/api/auth/register", json={"username": f"walk_{suffix}", "password": "walk-password-123", "full_name": "Walk User"})
@@ -924,6 +1048,8 @@ class SmartParkTestCase(unittest.TestCase):
         self.assertEqual(entered.status_code, 200)
         self.assertEqual(entered.get_json()["entry_type"], "WALK_IN")
         self.assertIsNotNone(entered.get_json()["ticket"]["entry_time"])
+        second_scan = admin.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers={"X-CSRF-Token": login.headers["X-CSRF-Token"]})
+        self.assertEqual(second_scan.status_code, 200)
         paid = self.client.post(
             "/api/payment/process",
             json={"ticket_code": ticket["ticket_code"]},

@@ -9,11 +9,86 @@ const API_BASE = window.location.protocol === "file:"
   ? "http://127.0.0.1:5000/api"
   : "/api";
 
+function formatRegistrationInput(value) {
+  const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  return [compact.slice(0, 2), compact.slice(2, 4), compact.slice(4, 6), compact.slice(6, 10)].filter(Boolean).join("-");
+}
+
+function validRegistrationInput(value) {
+  return /^[A-Z]{2}-\d{2}-[A-Z]{2}-\d{4}$/.test(value);
+}
+
+function formatISTDateTime(value) {
+  if (!value) return "—";
+  let normalized = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(normalized)) {
+    normalized = normalized.replace(" ", "T");
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(?:\.\d+)?)?$/.test(normalized)) {
+    normalized += "Z";
+  }
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short"
+  }).format(date);
+}
+
+function istDateTimeLocalValue(date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date).reduce((values, part) => {
+    values[part.type] = part.value;
+    return values;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
+
+function istDateTimeLocalToISO(value) {
+  return value ? new Date(`${value}:00+05:30`).toISOString() : "";
+}
+
 function ticketQrUrl(ticketCode) {
   return `${API_BASE}/tickets/${encodeURIComponent(ticketCode)}/qr`;
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Keep the payment page discoverable from every authenticated customer view.
+  const nav = document.querySelector(".site-nav-links");
+  if (nav && !nav.querySelector('a[href="/payment"]')) {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = "/payment";
+    link.textContent = "Payment & Exit";
+    item.append(link);
+    nav.insertBefore(item, nav.querySelector(".theme-toggle")?.parentElement || null);
+  }
+  const dashboardHeading = document.querySelector(".dashboard-heading");
+  if (dashboardHeading && !dashboardHeading.querySelector('a[href="/payment"]')) {
+    const link = document.createElement("a");
+    link.className = "btn btn-secondary";
+    link.href = "/payment";
+    link.textContent = "Payment & Exit";
+    dashboardHeading.append(link);
+  }
+  document.querySelectorAll('#vehicleNumber, #bookVehicleNumber, #paymentSearchInput, #adminParkingVehicleNumber, input[name="vehicle_number"]')
+    .forEach((field) => {
+    field.addEventListener("input", () => { field.value = formatRegistrationInput(field.value); field.setCustomValidity(""); });
+    field.addEventListener("blur", () => { field.value = formatRegistrationInput(field.value); field.setCustomValidity(field.value && !validRegistrationInput(field.value) ? "Invalid registration number. Use AA-00-AA-0000." : ""); });
+  });
   document.querySelectorAll(".mobile-menu-toggle").forEach((button) => {
     const nav = document.getElementById(button.getAttribute("aria-controls"));
     if (!nav) return;
@@ -96,10 +171,10 @@ window.addEventListener("click", (e) => {
 // ============================================================
 
 async function fetchAPI(endpoint, options = {}) {
-  try {
+  const requestOnce = async () => {
     const url = `${API_BASE}${endpoint}`;
     const defaultHeaders = { "Content-Type": "application/json" };
-    const response = await fetch(url, {
+    return fetch(url, {
       ...options,
       credentials: "include",
       headers: {
@@ -108,6 +183,19 @@ async function fetchAPI(endpoint, options = {}) {
         ...(options.headers || {})
       }
     });
+  };
+  try {
+    let response = await requestOnce();
+    // A page opened in a new tab can have a stale/missing token. Refresh it
+    // from the authenticated session once, then retry the original request.
+    if (response.status === 403 && options.method && options.method !== "GET") {
+      const refresh = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+      const refreshedToken = refresh.headers.get("X-CSRF-Token");
+      if (refreshedToken) {
+        sessionStorage.setItem("smartpark-csrf", refreshedToken);
+        response = await requestOnce();
+      }
+    }
 
     const csrf = response.headers.get("X-CSRF-Token");
     if (csrf) sessionStorage.setItem("smartpark-csrf", csrf);
@@ -453,7 +541,7 @@ async function scanAdminQrToken(token) {
         <span>Booking status</span><strong>${escapeHtml(booking.booking_status)}</strong>
         <span>Entry status</span><strong>${escapeHtml(booking.entry_status)}</strong>
         <span>Payment status</span><strong>${escapeHtml(booking.payment_status)}</strong>
-        ${booking.entry_time ? `<span>Entry time</span><strong>${escapeHtml(booking.entry_time)}</strong>` : ""}
+        ${booking.entry_time ? `<span>Entry time</span><strong>${escapeHtml(formatISTDateTime(booking.entry_time))}</strong>` : ""}
       </div>
       <div class="qr-action-row">${entryAction}${paymentAction}${exitAction}</div>
     `;
@@ -520,7 +608,7 @@ async function handleBookingForm(e) {
   e.preventDefault();
   const vNumber = document.getElementById("bookVehicleNumber").value.trim();
   const vType = document.getElementById("bookVehicleType").value;
-  const bookingTime = document.getElementById("bookingTime")?.value;
+  const bookingTime = istDateTimeLocalToISO(document.getElementById("bookingTime")?.value);
   const prefSlot = document.getElementById("prefSlotNumber")?.value.trim();
 
   if (!vNumber) {
@@ -582,7 +670,7 @@ function showTicketPassModal(ticket, slot, nav) {
   if (codeEl) codeEl.innerText = ticket.ticket_code;
   if (plateEl) plateEl.innerText = ticket.vehicle_number;
   if (slotEl) slotEl.innerText = slot ? slot.slot_number : (ticket.slot_number || "Assigned");
-  if (timeEl) timeEl.innerText = ticket.booking_time || ticket.entry_time;
+  if (timeEl) timeEl.innerText = formatISTDateTime(ticket.booking_time || ticket.entry_time);
 
   if (navContainer && nav && nav.turn_by_turn) {
     navContainer.innerHTML = `
@@ -681,13 +769,13 @@ function renderBillingDetails(ticket) {
     ? `Zone ${ticket.zone || "A"}, Slot ${ticket.slot_number}`
     : "Not assigned";
   document.getElementById("billScheduledTime").innerText = ticket.booking_time
-    ? `${new Date(ticket.booking_time).toLocaleString()} → ${ticket.scheduled_end_time ? new Date(ticket.scheduled_end_time).toLocaleString() : "—"}`
+    ? `${formatISTDateTime(ticket.booking_time)} → ${ticket.scheduled_end_time ? formatISTDateTime(ticket.scheduled_end_time) : "—"}`
     : "Walk-in / no scheduled time";
   const actualEntryRow = document.getElementById("billActualEntryRow");
   if (actualEntryRow) actualEntryRow.hidden = !ticket.entry_time;
   const actualTimes = document.getElementById("billActualTimes");
   if (actualTimes) {
-    actualTimes.innerText = `${ticket.entry_time ? new Date(ticket.entry_time).toLocaleString() : "—"} → ${ticket.exit_time ? new Date(ticket.exit_time).toLocaleString() : "In progress"}`;
+    actualTimes.innerText = `${ticket.entry_time ? formatISTDateTime(ticket.entry_time) : "—"} → ${ticket.exit_time ? formatISTDateTime(ticket.exit_time) : "In progress"}`;
   }
   document.getElementById("billDuration").innerText = bill ? bill.duration_formatted : "Not started";
   document.getElementById("billBaseRate").innerText = bill ? `₹${bill.base_rate.toFixed(2)}` : "—";
@@ -705,7 +793,9 @@ function renderBillingDetails(ticket) {
   const estimateNote = document.getElementById("estimateNote");
   const checkedIn = Boolean(ticket.entry_time);
   const completed = ticket.status === "COMPLETED";
-  const canPay = checkedIn && !completed && ticket.payment_status !== "PAID";
+  const secondScanComplete = Boolean(ticket.payment_scan_ready);
+  const cashPending = ticket.payment_method === "CASH" && ticket.payment_status === "PENDING";
+  const canPay = checkedIn && secondScanComplete && !completed && !cashPending && ticket.payment_status !== "PAID";
   if (actions) actions.hidden = !canPay;
   if (estimateNote) estimateNote.hidden = checkedIn || completed;
   const totalLabel = document.getElementById("billTotalLabel");
@@ -716,6 +806,13 @@ function renderBillingDetails(ticket) {
   }
   const paymentStatus = document.getElementById("billPaymentStatus");
   if (paymentStatus) paymentStatus.innerText = ticket.payment_status || "PENDING";
+  const scanNote = document.getElementById("paymentScanNote");
+  if (scanNote) {
+    scanNote.hidden = !checkedIn || completed || (!cashPending && secondScanComplete);
+    scanNote.textContent = cashPending
+      ? "Cash payment is awaiting administrator confirmation. The slot remains occupied until cash is confirmed."
+      : "Payment is locked until the QR ticket is scanned a second time at the exit scanner.";
+  }
 
   // Payment status badge
   const payBtn = document.getElementById("processPaymentBtn");
@@ -725,9 +822,9 @@ function renderBillingDetails(ticket) {
 }
 
 async function executePayment(method = "UPI_QR") {
-  if (!currentActiveTicket || !currentActiveTicket.entry_time ||
+  if (!currentActiveTicket || !currentActiveTicket.entry_time || !currentActiveTicket.payment_scan_ready ||
       currentActiveTicket.status !== "ACTIVE" || currentActiveTicket.payment_status === "PAID") {
-    showToast("Payment is available only for an active, checked-in parking session.", "error");
+    showToast("Scan the QR ticket a second time at the exit scanner before payment.", "error");
     return;
   }
 
@@ -742,6 +839,13 @@ async function executePayment(method = "UPI_QR") {
   });
 
   if (res.ok && res.data.success) {
+    if (res.data.cash_pending) {
+      currentActiveTicket.payment_method = "CASH";
+      currentActiveTicket.payment_status = "PENDING";
+      renderBillingDetails(currentActiveTicket);
+      showToast("Cash payment requested. An administrator must confirm receipt before the slot is released.", "info");
+      return;
+    }
     const ticketRes = await fetchAPI(`/tickets/${encodeURIComponent(currentActiveTicket.ticket_code)}`);
     if (ticketRes.ok && ticketRes.data.success) {
       currentActiveTicket = ticketRes.data.ticket;
@@ -766,8 +870,8 @@ function showPaymentReceiptModal(receipt) {
   if (rAmount) rAmount.innerText = `₹${receipt.amount_paid.toFixed(2)}`;
   if (rMethod) rMethod.innerText = receipt.payment_method;
   if (rTime) rTime.innerText = receipt.exit_time
-    ? `${new Date(receipt.entry_time).toLocaleString()} → ${new Date(receipt.exit_time).toLocaleString()}`
-    : receipt.timestamp;
+    ? `${formatISTDateTime(receipt.entry_time)} → ${formatISTDateTime(receipt.exit_time)}`
+    : formatISTDateTime(receipt.timestamp);
 
   openModal("paymentReceiptModal");
 }
@@ -796,7 +900,7 @@ async function loadAnalytics() {
       const typeClass = log.gate_type === "ENTRY" ? "log-type-entry" : "log-type-exit";
       return `
         <div class="log-entry">
-          <span class="log-time">[${log.timestamp ? log.timestamp.split(" ")[1] : ""}]</span>
+          <span class="log-time">[${log.timestamp ? formatISTDateTime(log.timestamp) : ""}]</span>
           <span class="${typeClass}">${log.gate_type}</span>
           <span><strong>${escapeHtml(log.vehicle_number || "UNKNOWN")}</strong> (${escapeHtml(log.trigger_source)}) - ${escapeHtml(log.notes || log.action_taken)}</span>
         </div>
@@ -805,16 +909,89 @@ async function loadAnalytics() {
   }
 }
 
+async function loadCashPaymentQueue() {
+  const list = document.getElementById("cashPaymentList");
+  if (!list) return;
+
+  const response = await fetchAPI("/admin/payment/cash-pending");
+  if (!response.ok || !response.data.success) {
+    list.textContent = response.data.error || "Could not load pending cash payments.";
+    return;
+  }
+
+  list.replaceChildren();
+  if (!response.data.payments.length) {
+    const empty = document.createElement("p");
+    empty.className = "admin-empty";
+    empty.textContent = "No cash payments are awaiting confirmation.";
+    list.append(empty);
+    return;
+  }
+
+  response.data.payments.forEach(payment => {
+    const card = document.createElement("article");
+    card.className = "cash-payment-card";
+    const details = document.createElement("div");
+    const vehicle = document.createElement("strong");
+    vehicle.textContent = payment.vehicle_number;
+    const info = document.createElement("p");
+    info.textContent = `Ticket ${payment.ticket_code} · Slot ${payment.slot_number || "—"} · Due ₹${Number(payment.amount_due).toFixed(2)}`;
+    details.append(vehicle, info);
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "btn btn-primary";
+    confirm.textContent = "Confirm cash received & release slot";
+    confirm.addEventListener("click", async () => {
+      if (!window.confirm(`Confirm cash received for ${payment.vehicle_number} (₹${Number(payment.amount_due).toFixed(2)}) and release ${payment.slot_number || "its slot"}?`)) return;
+      confirm.disabled = true;
+      const result = await fetchAPI("/admin/payment/release-cash", {
+        method: "POST",
+        body: JSON.stringify({ ticket_code: payment.ticket_code })
+      });
+      if (!result.ok || !result.data.success) {
+        confirm.disabled = false;
+        showToast(result.data.error || "Cash confirmation failed.", "error");
+        return;
+      }
+      showToast(result.data.message, "success");
+      await loadCashPaymentQueue();
+      await loadSystemStatusAndGrid();
+      await loadAnalytics();
+    });
+
+    card.append(details, confirm);
+    list.append(card);
+  });
+}
+
 function scheduleDailyAdminRefresh() {
   if (!document.getElementById("adminGateLogFeed")) return;
 
   const now = new Date();
-  const nextRefresh = new Date(now);
-  nextRefresh.setHours(24, 0, 0, 0);
+  const istParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now).reduce((values, part) => {
+    values[part.type] = part.value;
+    return values;
+  }, {});
+  const nextDate = new Date(Date.UTC(
+    Number(istParts.year),
+    Number(istParts.month) - 1,
+    Number(istParts.day) + 1
+  ));
+  const nextMidnightUtc = Date.UTC(
+    nextDate.getUTCFullYear(),
+    nextDate.getUTCMonth(),
+    nextDate.getUTCDate()
+  ) - (5 * 60 + 30) * 60 * 1000;
   window.setTimeout(async () => {
     await loadAnalytics();
     scheduleDailyAdminRefresh();
-  }, nextRefresh.getTime() - now.getTime());
+  }, nextMidnightUtc - now.getTime());
 }
 
 // ============================================================
@@ -822,15 +999,19 @@ function scheduleDailyAdminRefresh() {
 // ============================================================
 
 document.addEventListener("DOMContentLoaded", () => {
-  applyTheme(localStorage.getItem("smartpark-theme") || "dark");
+  const savedTheme = localStorage.getItem("smartpark-theme");
+  const initialTheme = savedTheme || (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  applyTheme(initialTheme);
 
   // Load grid and status
   loadSystemStatusAndGrid();
   scheduleDailyAdminRefresh();
+  loadCashPaymentQueue();
 
   // Auto-polling every 4 seconds to sync status across clients
   setInterval(() => {
     loadSystemStatusAndGrid();
+    loadCashPaymentQueue();
     if (document.getElementById("adminGateLogFeed")) {
       loadAnalytics();
     }
@@ -851,6 +1032,32 @@ document.addEventListener("DOMContentLoaded", () => {
   // Booking Form listener
   const bookForm = document.getElementById("bookingForm");
   if (bookForm) {
+    const bookingTimeInput = document.getElementById("bookingTime");
+    if (bookingTimeInput) {
+      const earliest = new Date(Date.now() + 15 * 60 * 1000);
+      bookingTimeInput.min = istDateTimeLocalValue(new Date());
+      if (!bookingTimeInput.value) bookingTimeInput.value = istDateTimeLocalValue(earliest);
+    }
+
+    const savedVehicleNumber = sessionStorage.getItem("smartpark-booking-vehicle-number");
+    const savedVehicleType = sessionStorage.getItem("smartpark-booking-vehicle-type");
+    sessionStorage.removeItem("smartpark-booking-vehicle-number");
+    sessionStorage.removeItem("smartpark-booking-vehicle-type");
+
+    const vehicleNumberInput = document.getElementById("bookVehicleNumber");
+    if (savedVehicleNumber && vehicleNumberInput) {
+      const formattedNumber = formatRegistrationInput(savedVehicleNumber);
+      if (validRegistrationInput(formattedNumber)) {
+        vehicleNumberInput.value = formattedNumber;
+      }
+    }
+
+    const vehicleTypeSelect = document.getElementById("bookVehicleType");
+    if (savedVehicleType && vehicleTypeSelect &&
+        Array.from(vehicleTypeSelect.options).some(option => option.value === savedVehicleType)) {
+      vehicleTypeSelect.value = savedVehicleType;
+    }
+
     bookForm.addEventListener("submit", handleBookingForm);
   }
   const walkInButton = document.getElementById("walkInButton");

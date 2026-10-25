@@ -134,6 +134,8 @@ class ParkingFacilityGraph:
 
 facility_graph = ParkingFacilityGraph()
 
+IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+
 
 def utc_naive(value):
     """Normalize database or request timestamps to UTC without tzinfo."""
@@ -142,6 +144,13 @@ def utc_naive(value):
     if value.tzinfo is not None:
         return value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
     return value
+
+
+def ist_naive_to_utc(value):
+    """Interpret a timezone-naive user-entered datetime as IST and return UTC."""
+    if value.tzinfo is not None:
+        return value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return value.replace(tzinfo=IST).astimezone(datetime.timezone.utc).replace(tzinfo=None)
 
 
 class SlotAllocationService:
@@ -365,8 +374,10 @@ class BillingService:
     @staticmethod
     def is_peak_hour(dt=None):
         if dt is None:
-            dt = datetime.datetime.now()
-        hour = dt.hour
+            dt = datetime.datetime.now(datetime.timezone.utc)
+        elif dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        hour = dt.astimezone(IST).hour
         for start, end in Config.PEAK_HOURS:
             if start <= hour < end:
                 return True

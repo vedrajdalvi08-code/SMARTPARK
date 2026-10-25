@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reserve a Slot | SMARTPARK</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="modern-site">
 
   <!-- Navigation Bar -->
   <nav class="navbar">
@@ -17,8 +17,8 @@
     <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="customerNav">Menu</button>
     <ul class="nav-links" id="customerNav">
       <li><a href="/parking">Live Availability</a></li>
-      <li><a href="booking.html" class="active">Book a Spot</a></li>
-      <li><a href="payment.html">Pay & Exit</a></li>
+      <li><a href="/booking" class="active">Book a Spot</a></li>
+      <li><a href="/payment">Pay & Exit</a></li>
       <li><a href="/customer">Customer home</a></li>
       <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
     </ul>
@@ -49,10 +49,10 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="bookingTime">Parking Date and Time *</label>
+            <label class="form-label" for="bookingTime">Parking Date and Time (IST) *</label>
             <input type="datetime-local" id="bookingTime" class="form-input" required>
             <small style="color: var(--text-subtle); display: block; margin-top: 0.35rem;">
-              Choose when you plan to arrive. This scheduled time is saved with your online booking.
+              Choose your arrival time in India Standard Time (IST). This scheduled time is saved with your online booking.
             </small>
           </div>
 

@@ -68,6 +68,11 @@ For a system diagram, component descriptions, and the main request flows, see
 - Capacity and availability exclude retired non-ground-level bays.
 - Billing calculates a vehicle-type base rate, additional billable hours,
   configured peak surcharge, and simulated GST.
+- The second admin QR scan opens the payment page for the scanned ticket in the
+  scanner browser; payment controls are enabled only after that scan.
+- A cash selection leaves the session and slot active. The admin dashboard lists
+  pending cash requests and releases the slot only after an administrator
+  confirms cash was received.
 - The payment interface and API are a **development simulation**. No real
   payment provider is connected and no money is transferred.
 - Successful simulated payment marks the ticket complete and releases its
@@ -124,6 +129,10 @@ Routes for old hardware webhooks and direct simulated entry are retired and
 return `410 Gone`; see [Limitations and security notes](#limitations-and-security-notes).
 
 ## Parking and ticket lifecycle
+
+All booking and session times shown to users use India Standard Time (IST).
+Timezone-naive booking input is interpreted as IST; timestamps are stored in
+UTC and converted to IST for display and IST-based daily/peak-hour reporting.
 
 1. The customer selects an available bay or asks the backend to allocate one.
    A reservation creates an active ticket in the database and reserves its

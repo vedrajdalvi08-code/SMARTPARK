@@ -24,6 +24,11 @@ body:has(.admin-workspace), body:has(.admin-shell-nav) {
 .admin-login-back { display:block; margin-top:1.25rem; color:var(--admin-muted); text-align:center; text-decoration:none; font-size:.85rem; }
 .scanner-reader { min-height:260px; display:grid; place-items:center; overflow:hidden; border:1px solid var(--admin-line); border-radius:10px; background:#050a12; }
 .scanner-video { display:block; width:100%; max-height:360px; object-fit:cover; }
+.scanner-payment-dialog { width:min(420px, calc(100% - 2rem)); padding:1.5rem; border:1px solid var(--admin-line); border-radius:14px; background:var(--admin-panel); color:var(--admin-text); box-shadow:0 24px 70px rgba(0,0,0,.45); }
+.scanner-payment-dialog::backdrop { background:rgba(3,8,16,.76); }
+.scanner-payment-dialog h2 { margin:0 0 .65rem; }
+.scanner-payment-dialog p { color:var(--admin-muted); line-height:1.5; }
+.scanner-payment-dialog .scanner-actions { display:flex; flex-wrap:wrap; gap:.65rem; margin-top:1rem; }
 .admin-shell-nav {
   min-height: 72px;
   display: flex;
@@ -63,6 +68,9 @@ body:has(.admin-workspace), body:has(.admin-shell-nav) {
 .admin-page-header p { color:var(--admin-muted); margin:0; }
 .admin-data-section { margin-bottom:1.5rem; }
 .admin-empty { color:var(--admin-muted); padding:1.5rem; text-align:center; }
+.cash-payment-card { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem; border-top:1px solid var(--admin-line); }
+.cash-payment-card p { margin:.35rem 0 0; overflow-wrap:anywhere; }
+.cash-payment-card .btn { flex-shrink:0; }
 .payment-development-note { border:1px solid rgba(243,181,98,.35); background:rgba(243,181,98,.08); color:var(--admin-warning); padding:.8rem 1rem; border-radius:8px; font-size:.85rem; }
 .admin-workspace .hero-title, .admin-workspace h1, .admin-workspace h2, .admin-workspace h3 { color:var(--admin-text); }
 .admin-workspace .stat-card, .admin-workspace .sim-box, .admin-workspace .settings-strip, .admin-workspace .parking-map-container { background:var(--admin-panel); border:1px solid var(--admin-line); box-shadow:0 16px 40px rgba(0,0,0,.18); }
@@ -76,4 +84,5 @@ body:has(.admin-workspace), body:has(.admin-shell-nav) {
   .admin-nav-links { order:3; flex-basis:100%; overflow-x:auto; flex-wrap:nowrap; padding-bottom:.25rem; }
   .admin-nav-links a { display:block; white-space:nowrap; }
   .admin-page-header { align-items:flex-start; flex-direction:column; }
+  .cash-payment-card { align-items:stretch; flex-direction:column; }
 }

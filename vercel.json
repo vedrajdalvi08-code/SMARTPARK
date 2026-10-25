@@ -53,6 +53,18 @@
       "dest": "/frontend/payment.html"
     },
     {
+      "src": "/maps/?",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/bookings/?",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/profile/?",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/admin.html",
       "dest": "/api/index.py"
     },

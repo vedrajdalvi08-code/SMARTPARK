@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QR Scanner | SMARTPARK Operations</title>
+  <title>Entry & Exit Scanner | SMARTPARK Operations</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/admin.css">
 </head>
@@ -15,14 +15,22 @@
   <main class="admin-scanner-layout">
     <section class="admin-login-card scanner-card">
       <div class="admin-login-kicker">Gate operations</div>
-      <h1>QR ticket scanner</h1>
-      <p>Scan once to authorize entry. A later scan identifies the active session and shows the payment or exit action required.</p>
+      <h1>Entry & Exit QR Scanner</h1>
+      <p>Use this single scanner for the complete workflow: first scan starts entry, and the second scan opens the payment page. Cash requests remain active until an administrator confirms receipt and releases the slot.</p>
       <div id="reader" class="scanner-reader" aria-label="Camera QR scanner"><video id="qrVideo" class="scanner-video" playsinline muted></video></div>
       <div class="scanner-actions"><button class="btn btn-primary" id="startScanner">Start camera</button><button class="btn btn-secondary" id="stopScanner" disabled>Stop camera</button></div>
       <label class="form-label" for="manualToken">Manual ticket code</label>
       <div class="scanner-manual"><input class="form-input" id="manualToken" placeholder="SP-..." autocomplete="off"><button class="btn btn-secondary" id="submitManual">Process</button></div>
       <p id="scannerStatus" class="scanner-status" role="status">Camera is stopped. Manual entry is available.</p>
       <article id="scanResult" class="scanner-result" hidden></article>
+      <dialog id="paymentPrompt" class="scanner-payment-dialog" aria-labelledby="paymentPromptTitle">
+        <h2 id="paymentPromptTitle">Payment required</h2>
+        <p id="paymentPromptMessage">The parking session is ready for checkout.</p>
+        <div class="scanner-actions">
+          <button class="btn btn-primary" id="openPaymentPage" type="button">Continue to payment</button>
+          <button class="btn btn-secondary" id="closePaymentPrompt" type="button">Stay on scanner</button>
+        </div>
+      </dialog>
     </section>
   </main>
   <script src="/app.js"></script>
@@ -35,11 +43,31 @@
       let busy = false;
       const status = document.getElementById('scannerStatus');
       const result = document.getElementById('scanResult');
-      const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-      const render = data => { const booking = data.booking || {}; result.hidden = false; result.innerHTML = `<strong>${esc(data.message || 'Scan processed')}</strong><p>Vehicle: ${esc(booking.vehicle_number)} · Slot: ${esc(booking.slot?.slot_number || booking.ticket?.slot_number || 'Pending')}</p><p>Entry: ${esc(booking.entry_time || booking.ticket?.entry_time || 'Not entered')} · Next: ${esc(data.next_action || (data.entry_authorized ? 'ENTRY_AUTHORIZED' : booking.payment_status))}</p>`; };
+      const render = data => {
+        const booking = data.booking || {};
+        result.hidden = false;
+        result.replaceChildren();
+        const title = document.createElement('strong');
+        title.textContent = data.message || 'Scan processed';
+        const details = document.createElement('p');
+        details.textContent = `Vehicle: ${booking.vehicle_number || '—'} · Slot: ${booking.slot?.slot_number || booking.ticket?.slot_number || 'Pending'}`;
+        const next = document.createElement('p');
+        next.textContent = `Entry: ${booking.entry_time || booking.ticket?.entry_time ? formatISTDateTime(booking.entry_time || booking.ticket?.entry_time) : 'Not entered'} · Next: ${data.next_action || (data.entry_authorized ? 'ENTRY_AUTHORIZED' : booking.payment_status || '—')}`;
+        result.append(title, details, next);
+        if (data.next_action === 'PAYMENT_REQUIRED' && data.payment_url) {
+          const prompt = document.createElement('p');
+          prompt.textContent = 'Payment is ready. Use the payment page to choose a digital method or request cash.';
+          result.append(prompt);
+          document.getElementById('paymentPromptMessage').textContent =
+            `Payment is ready for ${booking.vehicle_number || 'this vehicle'} at slot ${booking.slot?.slot_number || '—'}.`;
+          document.getElementById('openPaymentPage').onclick = () => { window.location.href = data.payment_url; };
+          document.getElementById('paymentPrompt').showModal();
+        }
+      };
       async function stopCamera() { if (nativeLoop) { cancelAnimationFrame(nativeLoop); nativeLoop = null; } if (nativeStream) { nativeStream.getTracks().forEach(track => track.stop()); nativeStream = null; } if (scanner) { await scanner.stop().catch(() => {}); scanner.clear(); } document.getElementById('qrVideo').srcObject = null; document.getElementById('startScanner').disabled = false; document.getElementById('stopScanner').disabled = true; }
       async function processToken(token) { if (busy || !token.trim()) return; busy = true; status.textContent = 'Validating ticket and processing scan…'; try { const response = await fetchAPI('/admin/qr/scan-entry', { method: 'POST', body: JSON.stringify({ token }) }); if (!response.ok) { status.textContent = response.data?.error || `Scanner request failed (${response.status || 'network error'}).`; return; } await stopCamera(); status.textContent = 'Scan accepted.'; render(response.data); } catch (error) { status.textContent = 'Scanner could not reach the backend. Confirm Flask is running and you are signed in.'; } finally { busy = false; } }
       document.getElementById('submitManual').onclick = () => processToken(document.getElementById('manualToken').value);
+      document.getElementById('closePaymentPrompt').onclick = () => document.getElementById('paymentPrompt').close();
       async function startNativeCamera() { const video = document.getElementById('qrVideo'); nativeDetector = new BarcodeDetector({ formats: ['qr_code'] }); nativeStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }); video.srcObject = nativeStream; await video.play(); const detect = async () => { if (!nativeStream || busy) { if (nativeStream) nativeLoop = requestAnimationFrame(detect); return; } try { const codes = await nativeDetector.detect(video); if (codes[0]?.rawValue) { await processToken(codes[0].rawValue); return; } } catch (_) {} nativeLoop = requestAnimationFrame(detect); }; nativeLoop = requestAnimationFrame(detect); }
       async function loadQrFallback() { if (window.Html5Qrcode) return; await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'; script.onload = resolve; script.onerror = () => reject(new Error('QR decoder could not be loaded.')); document.head.append(script); }); }
       async function startLibraryCamera() { await loadQrFallback(); if (!window.Html5Qrcode) throw new Error('decoder unavailable'); scanner = scanner || new Html5Qrcode('reader'); await scanner.start({ facingMode: 'environment' }, { fps: 15, qrbox: { width: 280, height: 280 } }, token => processToken(token), () => {}); }

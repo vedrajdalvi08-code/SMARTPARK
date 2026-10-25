@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Payment & Checkout | SMARTPARK</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="modern-site">
 
   <!-- Navigation Bar -->
   <nav class="navbar">
@@ -17,8 +17,8 @@
     <button class="mobile-menu-toggle" type="button" aria-expanded="false" aria-controls="customerNav">Menu</button>
     <ul class="nav-links" id="customerNav">
       <li><a href="/parking">Live Availability</a></li>
-      <li><a href="booking.html">Book a Spot</a></li>
-      <li><a href="payment.html" class="active">Pay & Exit</a></li>
+      <li><a href="/booking">Book a Spot</a></li>
+      <li><a href="/payment" class="active">Pay & Exit</a></li>
       <li><a href="/customer">Customer home</a></li>
       <li><button class="theme-toggle" type="button" onclick="toggleTheme()" aria-label="Toggle light and dark mode"><span id="themeIcon">☀</span></button></li>
     </ul>
@@ -111,6 +111,7 @@
         </div>
 
         <p id="estimateNote" class="payment-development-note" hidden>Estimate only: the final amount may change based on the actual parking duration. No payment is created until the vehicle is scanned in and payment is completed through the exit workflow.</p>
+        <p id="paymentScanNote" class="payment-development-note" hidden>Payment is locked until the QR ticket is scanned a second time at the exit scanner.</p>
         <div id="paymentActions" hidden>
         <p class="payment-development-note">Development payment workflow: no real money is transferred. The server records the selected method and completes exit only after its own payment-state validation.</p>
         <h4 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-muted);">Choose a payment method for development testing:</h4>

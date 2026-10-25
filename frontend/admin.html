@@ -20,6 +20,11 @@
       <article class="stat-card"><div class="stat-label">System</div><div class="stat-value" style="font-size:1.25rem;color:var(--admin-accent)">Software only</div><div class="stat-desc">QR and database workflows</div></article>
     </section>
     <section id="parking" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Parking slots</div><span class="admin-status-dot">Live database view</span></div><p class="admin-slot-help">Reserved (yellow) and occupied slots have an <strong>Edit parking</strong> button. Edit vehicle or slot type, cancel a reservation, or force-remove an active parking session.</p><div id="parkingGrid" class="parking-grid"><p class="admin-empty">Loading slot availability…</p></div></section>
+    <section id="cashPaymentQueue" class="sim-box admin-data-section" aria-labelledby="cashPaymentQueueHeading">
+      <div class="sim-header"><div class="sim-title" id="cashPaymentQueueHeading">Cash payments awaiting confirmation</div><span class="admin-status-dot">Admin action required</span></div>
+      <p class="admin-slot-help">Confirm cash only after receiving it. Confirmation records payment and releases the occupied slot.</p>
+      <div id="cashPaymentList" aria-live="polite"><p class="admin-empty">Loading pending cash payments…</p></div>
+    </section>
     <section id="activityLog" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Recent entry and exit activity</div><span class="admin-status-dot">Audit log</span></div><div id="adminGateLogFeed" class="log-terminal"><p class="admin-empty">Loading activity…</p></div></section>
   </main>
   <div class="modal-overlay" id="adminParkingEditor" role="dialog" aria-modal="true" aria-labelledby="adminParkingEditorTitle" aria-hidden="true">

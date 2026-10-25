@@ -41,6 +41,7 @@ class User(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     tickets = relationship("Ticket", back_populates="user")
+    vehicles = relationship("Vehicle", back_populates="user", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -52,6 +53,22 @@ class User(Base):
             "role": self.role,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
+
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehicle_number = Column(String(25), nullable=False)
+    vehicle_type = Column(SQLEnum("TWO_WHEELER", "COMPACT", "SUV", "EV", name="vehicle_type_enum"), nullable=False, default="COMPACT")
+    nickname = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    user = relationship("User", back_populates="vehicles")
+    __table_args__ = (UniqueConstraint("user_id", "vehicle_number", name="uq_customer_vehicle"),)
+
+    def to_dict(self):
+        return {"id": self.id, "vehicle_number": self.vehicle_number, "vehicle_type": self.vehicle_type, "nickname": self.nickname}
 
 
 class LoginAttempt(Base):

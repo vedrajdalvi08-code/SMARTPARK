@@ -86,6 +86,11 @@ def create_app():
     def customer_parking_page():
         return send_from_directory(str(FRONTEND_DIR), "index.html")
 
+    @app.route("/maps")
+    @app.route("/maps/")
+    def customer_maps_page():
+        return send_from_directory(str(FRONTEND_DIR), "maps.html")
+
     @app.route("/admin")
     @app.route("/admin/")
     def admin_page():
@@ -153,6 +158,24 @@ def create_app():
         if session.get("admin_user"):
             return redirect("/admin")
         return send_from_directory(str(FRONTEND_DIR), "customer-register.html")
+
+    @app.route("/bookings")
+    @app.route("/bookings/")
+    def customer_bookings_page():
+        if session.get("admin_user"):
+            return redirect("/admin")
+        if not session.get("customer_user"):
+            return redirect("/customer/login?next=/bookings")
+        return send_from_directory(str(FRONTEND_DIR), "bookings.html")
+
+    @app.route("/profile")
+    @app.route("/profile/")
+    def customer_profile_page():
+        if session.get("admin_user"):
+            return redirect("/admin")
+        if not session.get("customer_user"):
+            return redirect("/customer/login?next=/profile")
+        return send_from_directory(str(FRONTEND_DIR), "profile.html")
 
     @app.route("/portals")
     @app.route("/portal")
