@@ -60,11 +60,22 @@ class Config:
     # Supabase uses PostgreSQL underneath.
     DATABASE_URL = _database_url()
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "1"))
+    DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "0"))
+    DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+    if DB_POOL_SIZE < 1 or DB_MAX_OVERFLOW < 0 or DB_POOL_TIMEOUT < 1:
+        raise ValueError(
+            "DB_POOL_SIZE must be at least 1; DB_MAX_OVERFLOW must be non-negative; "
+            "DB_POOL_TIMEOUT must be at least 1 second."
+        )
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
+        "pool_size": DB_POOL_SIZE,
+        "max_overflow": DB_MAX_OVERFLOW,
+        "pool_timeout": DB_POOL_TIMEOUT,
     }
     AUTO_CREATE_SCHEMA = os.getenv("AUTO_CREATE_SCHEMA", "0" if os.getenv("FLASK_ENV", "development").lower() == "production" else "1") == "1"
 

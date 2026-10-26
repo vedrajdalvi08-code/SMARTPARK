@@ -22,6 +22,20 @@ def utc_now():
     """Return a naive UTC datetime for compatibility with existing columns."""
     return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
+
+def _engine_options(database_url):
+    """Build bounded PostgreSQL pool settings without changing SQLite test pools."""
+    options = dict(Config.SQLALCHEMY_ENGINE_OPTIONS)
+    if database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+        options["connect_args"] = {
+            "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+        }
+    else:
+        for option in ("pool_size", "max_overflow", "pool_timeout"):
+            options.pop(option, None)
+    return options
+
+
 # ============================================================
 # MODELS
 # ============================================================
@@ -302,26 +316,30 @@ def init_db(app=None):
     global engine, SessionLocal
 
     database_url = Config.SQLALCHEMY_DATABASE_URI
+    candidate_engine = None
 
     try:
         logger.info("Connecting to database...")
-        connect_args = {}
-        if database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
-            connect_args["connect_timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
-
-        engine = create_engine(
+        candidate_engine = create_engine(
             database_url,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            connect_args=connect_args
+            **_engine_options(database_url)
         )
 
-        with engine.connect() as conn:
+        with candidate_engine.connect() as conn:
             conn.execute(text("SELECT 1"))
 
+        engine = candidate_engine
         logger.info("Successfully connected to database.")
     except Exception as exc:
         logger.error("Supabase PostgreSQL connection failed: %s", exc)
+        if candidate_engine is not None:
+            candidate_engine.dispose()
+        if "EMAXCONNSESSION" in str(exc):
+            raise RuntimeError(
+                "Supabase session pooler is at its client limit. Stop unused app "
+                "instances and keep the combined DB_POOL_SIZE + DB_MAX_OVERFLOW "
+                "across running processes within the Supabase connection limit."
+            ) from exc
         raise RuntimeError(
             "SMARTPARK could not connect to Supabase PostgreSQL. "
             "Check SUPABASE_DB_URL/DATABASE_URL and your Supabase database credentials."

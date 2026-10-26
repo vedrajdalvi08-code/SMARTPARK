@@ -68,6 +68,35 @@ class SmartParkTestCase(unittest.TestCase):
             os.environ["SESSION_COOKIE_SECURE"] = "true"
             self.assertTrue(_session_cookie_secure())
 
+    def test_postgres_pool_is_bounded_and_sqlite_options_remain_compatible(self):
+        postgres_options = database._engine_options("postgresql+psycopg2://host/db")
+        self.assertEqual(postgres_options["pool_size"], Config.DB_POOL_SIZE)
+        self.assertEqual(postgres_options["max_overflow"], Config.DB_MAX_OVERFLOW)
+        self.assertEqual(postgres_options["pool_timeout"], Config.DB_POOL_TIMEOUT)
+        self.assertEqual(Config.DB_POOL_SIZE, 1)
+        self.assertEqual(Config.DB_MAX_OVERFLOW, 0)
+        self.assertEqual(
+            postgres_options["connect_args"]["connect_timeout"],
+            int(os.getenv("DB_CONNECT_TIMEOUT", "10")),
+        )
+
+        sqlite_options = database._engine_options("sqlite:///:memory:")
+        self.assertNotIn("pool_size", sqlite_options)
+        self.assertNotIn("max_overflow", sqlite_options)
+        self.assertNotIn("pool_timeout", sqlite_options)
+        self.assertNotIn("connect_args", sqlite_options)
+
+    def test_session_pooler_limit_has_actionable_startup_error(self):
+        with patch.object(
+            database.Config, "SQLALCHEMY_DATABASE_URI",
+            "postgresql+psycopg2://unused/unused"
+        ), patch(
+            "database.create_engine",
+            side_effect=RuntimeError("EMAXCONNSESSION max clients reached"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Supabase session pooler is at its client limit"):
+                database.init_db()
+
     # --------------------------------------------------------
     # 1. DSA & SERVICES TESTS
     # --------------------------------------------------------
@@ -178,6 +207,36 @@ class SmartParkTestCase(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertEqual(data["count"], 18)
         self.assertTrue(all(slot["floor_level"] == 0 for slot in data["slots"]))
+
+    def test_slots_list_hides_vehicle_numbers_from_non_admins(self):
+        session_db = database.SessionLocal()
+        try:
+            slot = session_db.query(ParkingSlot).filter_by(floor_level=0).first()
+            slot.status = "OCCUPIED"
+            slot.active_vehicle_number = "KA-01-AB-1234"
+            session_db.commit()
+            slot_id = slot.id
+        finally:
+            session_db.close()
+
+        public_response = self.client.get("/api/slots")
+        self.assertEqual(public_response.status_code, 200)
+        public_slot = next(
+            item for item in public_response.get_json()["slots"]
+            if item["id"] == slot_id
+        )
+        self.assertNotIn("active_vehicle_number", public_slot)
+
+        admin_client = self.app.test_client()
+        with admin_client.session_transaction() as admin_session:
+            admin_session["admin_user"] = {"id": 1, "username": "test-admin", "role": "ADMIN"}
+        admin_response = admin_client.get("/api/slots")
+        self.assertEqual(admin_response.status_code, 200)
+        admin_slot = next(
+            item for item in admin_response.get_json()["slots"]
+            if item["id"] == slot_id
+        )
+        self.assertEqual(admin_slot["active_vehicle_number"], "KA-01-AB-1234")
 
     def test_legacy_deck_slots_are_excluded_from_operational_inventory(self):
         session = database.SessionLocal()
@@ -786,7 +845,12 @@ class SmartParkTestCase(unittest.TestCase):
     def test_admin_pages_and_logout_are_protected(self):
         with self.client.session_transaction() as browser_session:
             browser_session.clear()
-        for path in ("/admin", "/admin/", "/admin.html", "/admin/dashboard", "/admin/parking"):
+        for path in (
+            "/admin", "/admin/", "/admin.html", "/admin/dashboard",
+            "/admin/parking", "/admin/analytics", "/admin/slots",
+            "/admin/maps", "/admin/qr", "/admin/reservations",
+            "/admin/users", "/admin/payments", "/admin/settings",
+        ):
             response = self.client.get(path, follow_redirects=False)
             self.assertEqual(response.status_code, 302)
             self.assertIn("/admin/login", response.headers["Location"])
@@ -809,7 +873,8 @@ class SmartParkTestCase(unittest.TestCase):
         self.assertIn('onclick="openAdminParkingEditorById(${Number(slot.id)}, event)"', app_script)
         self.assertIn('editButton = event.target.closest("[data-edit-slot-id]")', app_script)
         self.assertIn(b"and occupied slots have an", admin_page.data)
-        self.assertIn(b"app.js?v=admin-reserved-editor", admin_page.data)
+        self.assertIn(b"app.js?v=admin-workspace", admin_page.data)
+        self.assertIn(b"admin-dashboard.js?v=admin-workspace", admin_page.data)
         self.assertIn("function scheduleDailyAdminRefresh()", app_script)
         self.assertIn("await loadAnalytics();", app_script)
         self.assertIn("scheduleDailyAdminRefresh();", app_script)
@@ -1075,6 +1140,107 @@ class SmartParkTestCase(unittest.TestCase):
         entered = admin.post("/api/admin/qr/scan-entry", json={"token": ticket["ticket_code"]}, headers={"X-CSRF-Token": login.headers["X-CSRF-Token"]})
         self.assertEqual(entered.status_code, 200)
         self.assertEqual(entered.get_json()["entry_type"], "RESERVATION")
+
+    def test_admin_workspace_data_endpoints_are_authenticated_and_use_persisted_records(self):
+        anonymous = self.app.test_client()
+        self.assertEqual(anonymous.get("/api/admin/records/users").status_code, 401)
+        self.assertEqual(anonymous.get("/api/admin/analytics").status_code, 401)
+        self.assertEqual(anonymous.get("/api/admin/settings").status_code, 401)
+
+        suffix = uuid.uuid4().hex[:6]
+        username = f"workspace_{suffix}"
+        registered = self.client.post("/api/auth/register", json={
+            "username": username,
+            "password": "workspace-password-123",
+            "full_name": "Workspace Customer",
+            "email": f"{username}@example.test",
+        })
+        self.assertEqual(registered.status_code, 201)
+        reservation = self.client.post(
+            "/api/slots/reserve",
+            json={"vehicle_number": f"KA-07-WS-{suffix[:4]}"},
+            headers={"X-CSRF-Token": registered.headers["X-CSRF-Token"]},
+        )
+        self.assertEqual(reservation.status_code, 200)
+        ticket_code = reservation.get_json()["ticket"]["ticket_code"]
+
+        admin = self.app.test_client()
+        login = admin.post("/api/admin/login", json={
+            "username": Config.ADMIN_USERNAME,
+            "password": Config.ADMIN_PASSWORD,
+        })
+        self.assertEqual(login.status_code, 200)
+        entry = admin.post(
+            "/api/admin/qr/scan-entry",
+            json={"token": ticket_code},
+            headers={"X-CSRF-Token": login.headers["X-CSRF-Token"]},
+        )
+        self.assertEqual(entry.status_code, 200)
+
+        users = admin.get(f"/api/admin/records/users?q={username}").get_json()
+        self.assertTrue(users["success"])
+        self.assertEqual(users["pagination"]["total"], 1)
+        self.assertEqual(users["records"][0]["username"], username)
+        self.assertNotIn("password_hash", users["records"][0])
+
+        reservations = admin.get(
+            f"/api/admin/records/reservations?q={ticket_code}"
+        ).get_json()
+        self.assertEqual(reservations["pagination"]["total"], 1)
+        self.assertEqual(reservations["records"][0]["ticket_code"], ticket_code)
+        payments_response = admin.get("/api/admin/records/payments")
+        self.assertEqual(payments_response.status_code, 200, payments_response.get_json())
+        payments = payments_response.get_json()
+        self.assertTrue(payments["success"])
+        self.assertGreaterEqual(payments["pagination"]["total"], 1)
+        self.assertIn(ticket_code, {record["ticket_code"] for record in payments["records"]})
+        searched_payments = admin.get(
+            f"/api/admin/records/payments?q={ticket_code}&status=PENDING"
+        )
+        self.assertEqual(searched_payments.status_code, 200, searched_payments.get_json())
+        self.assertEqual(searched_payments.get_json()["pagination"]["total"], 1)
+        self.assertEqual(
+            searched_payments.get_json()["records"][0]["payment_status"],
+            "PENDING",
+        )
+        all_qr_records_response = admin.get("/api/admin/records/qr?page=1&page_size=25")
+        self.assertEqual(
+            all_qr_records_response.status_code,
+            200,
+            all_qr_records_response.get_json(),
+        )
+        all_qr_records = all_qr_records_response.get_json()
+        self.assertIn(ticket_code, {record["ticket_code"] for record in all_qr_records["records"]})
+
+        qr_records = admin.get(f"/api/admin/records/qr?q={ticket_code}").get_json()
+        self.assertEqual(qr_records["records"][0]["qr_status"], "ACTIVE")
+        self.assertEqual(
+            admin.get(f"/api/tickets/{ticket_code}/qr").status_code,
+            200,
+        )
+
+        settings = admin.get("/api/admin/settings").get_json()
+        self.assertFalse(settings["editable"])
+        self.assertEqual(settings["timezone"], "Asia/Kolkata")
+        self.assertIn("COMPACT", settings["rates"])
+
+        analytics = admin.get("/api/admin/analytics?period=7d").get_json()
+        self.assertTrue(analytics["success"])
+        self.assertEqual(analytics["range"]["timezone"], "Asia/Kolkata")
+        self.assertGreaterEqual(analytics["metrics"]["tickets_created"], 1)
+        self.assertGreaterEqual(analytics["metrics"]["arrivals"], 1)
+        self.assertEqual(len(analytics["entry_hours_ist"]), 24)
+        self.assertEqual(len(analytics["daily"]), 7)
+
+    def test_admin_workspace_rejects_invalid_filters_and_pagination(self):
+        admin = self.app.test_client()
+        admin.post("/api/admin/login", json={
+            "username": Config.ADMIN_USERNAME,
+            "password": Config.ADMIN_PASSWORD,
+        })
+        self.assertEqual(admin.get("/api/admin/records/payments?page=abc").status_code, 400)
+        self.assertEqual(admin.get("/api/admin/records/reservations?status=BOGUS").status_code, 400)
+        self.assertEqual(admin.get("/api/admin/analytics?period=custom&start=2026-02-02&end=2026-01-01").status_code, 400)
 
 
 if __name__ == "__main__":

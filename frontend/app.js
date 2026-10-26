@@ -306,11 +306,14 @@ function renderParkingGrid() {
     const editableSlot = adminDashboard && ["OCCUPIED", "RESERVED"].includes(slot.status);
     const selectableSlot = Boolean(document.getElementById("prefSlotNumber")) && slot.status === "AVAILABLE";
     const interactive = editableSlot || selectableSlot;
+    const vehicleNumber = adminDashboard && slot.active_vehicle_number
+      ? `<div class="slot-vehicle">${escapeHtml(slot.active_vehicle_number)}</div>`
+      : "";
     return `
       <div class="slot-card ${statusClass} ${typeClass}" data-slot-number="${escapeHtml(slot.slot_number)}" ${interactive ? 'role="button" tabindex="0"' : ""}>
         <div class="slot-number">${escapeHtml(slot.slot_number)}</div>
         <span class="slot-type-badge">${escapeHtml(slot.slot_type)}</span>
-        ${slot.active_vehicle_number ? `<div class="slot-vehicle">${escapeHtml(slot.active_vehicle_number)}</div>` : ""}
+        ${vehicleNumber}
         <div class="slot-distance">📍 ${escapeHtml(slot.distance_from_entry)}m from gate</div>
         ${editableSlot ? `<button class="admin-edit-parking" type="button" data-edit-slot-id="${Number(slot.id)}" onclick="openAdminParkingEditorById(${Number(slot.id)}, event)">Edit parking</button>` : ""}
       </div>
@@ -363,9 +366,8 @@ function handleSlotClick(slotNumber) {
       showToast(`Selected Bay ${slot.slot_number} for booking.`, "info");
       return;
     }
-  } else if (slot.status === "OCCUPIED" && slot.active_vehicle_number) {
-    // Quick search payment
-    showToast(`Slot ${slot.slot_number} occupied by ${slot.active_vehicle_number}.`, "info");
+  } else if (slot.status === "OCCUPIED") {
+    showToast(`Slot ${slot.slot_number} is occupied.`, "info");
   }
 }
 

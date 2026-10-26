@@ -62,10 +62,13 @@ build. The browser calls the API using same-origin `/api` paths.
   simulated payment action.
 - `customer*.html` pages support customer sign-in, registration, account,
   booking, session, and payment history experiences.
-- `admin*.html` pages provide administrator login, dashboard, QR scanning,
-  and operational slot controls.
+- `admin*.html` pages provide administrator login, the protected shared
+  operations workspace, and QR scanning.
+- `admin-dashboard.js` handles workspace section routing, paginated customer,
+  reservation, payment, and QR views, IST analytics, and read-only settings.
 - `app.js` contains same-origin API requests, session/CSRF token handling,
-  polling, slot rendering, booking, ticket, and payment UI logic.
+  polling, slot rendering, booking, ticket, payment, and shared admin
+  operations UI logic.
 - `style.css` provides the customer/shared responsive design; `admin.css`
   styles administrator-specific views.
 
@@ -99,6 +102,13 @@ parking status, and logs belong in PostgreSQL, not process memory or a local
 SQLite file. Keep the same strong `FLASK_SECRET_KEY` configured across
 deployments so Flask sessions can be validated consistently.
 
+SQLAlchemy maintains a bounded database pool in each application process.
+The PostgreSQL defaults are one pooled connection and zero overflow, suitable
+for conserving Supabase session-pooler clients. Pool usage multiplies by the
+number of running workers/instances; higher-concurrency serverless deployments
+should use Supabase transaction mode and keep the combined connection budget
+within the project limit.
+
 ## Data model
 
 SQLAlchemy maps the application to these PostgreSQL tables:
@@ -125,6 +135,10 @@ released.
 the app does not apply migrations automatically at startup. See
 [migrations/README.md](./migrations/README.md).
 
+The admin workspace's records, analytics, and settings endpoints use the
+existing tables and require no additional migration. Its payment view queries
+payment data independently of the reservation and QR record joins.
+
 ## Authentication and trust boundaries
 
 - Customer registration creates `CUSTOMER` accounts only. Customer and
@@ -133,6 +147,9 @@ the app does not apply migrations automatically at startup. See
   `ADMIN_PASSWORD`; customer passwords are hashed in the database.
 - Administrator APIs check the session role. Mutating admin endpoints require
   a valid CSRF token.
+- Admin record APIs are paginated and read from persisted customer and ticket
+  data. The payment list selects only payment-specific columns; settings
+  expose non-secret, read-only deployment configuration.
 - Customer-owned ticket lookup and QR image generation scope records to the
   signed-in customer. Guest ticket details use a ticket code and only return
   eligible guest-owned records.

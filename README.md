@@ -49,7 +49,16 @@ For a system diagram, component descriptions, and the main request flows, see
 
 ### Administrator experience
 
-- Dedicated administrator portal and scanner.
+- Shared, session-protected administrator workspace with overview, analytics,
+  parking slots, facility map, QR status, reservations, customers, payments,
+  and settings.
+- Paginated customer and ticket records are read from the database; customer
+  password hashes are never included in the administrator records API.
+- Analytics support today, 7-day, 30-day, and bounded custom ranges. Date
+  grouping and displayed times use India Standard Time.
+- Pricing, facility coordinates, and integration settings are shown as
+  read-only deployment configuration; update secured server environment
+  settings and redeploy to change them.
 - View facility availability, analytics, recent gate logs, bookings, and
   active parking sessions.
 - Validate a ticket QR and use the protected scanner workflow to check in a
@@ -110,7 +119,8 @@ production OCR model. Do not use its output as a real access-control decision.
 | Customer sign-in | `/customer/login` | Customer authentication. |
 | Customer registration | `/customer/register` | Create a customer account. |
 | Administrator sign-in | `/admin/login` | Administrator authentication. |
-| Administrator dashboard | `/admin` | Protected operations and analytics dashboard. |
+| Administrator dashboard | `/admin` | Protected overview and operations dashboard. |
+| Administrator workspace sections | `/admin/overview`, `/admin/analytics`, `/admin/slots`, `/admin/maps`, `/admin/qr`, `/admin/reservations`, `/admin/users`, `/admin/payments`, `/admin/settings` | Protected single-shell admin views backed by live application data. |
 | Administrator scanner | `/admin/scanner` | Protected QR scanner and check-in workflow. |
 
 The backend API is mounted at `/api`. Key API groups include:
@@ -122,6 +132,8 @@ The backend API is mounted at `/api`. Key API groups include:
 | `/api/auth/*`, `/api/customer/*` | Customer authentication, profile, history, walk-ins, and cancellation. |
 | `/api/admin/login`, `/api/admin/logout`, `/api/admin/me` | Administrator session lifecycle. |
 | `/api/admin/qr/*`, `/api/admin/slots/*` | Protected QR check-in and per-slot administration. |
+| `/api/admin/records/{users,reservations,payments,qr}` | Protected, paginated administrator records with search and supported status filters. |
+| `/api/admin/analytics`, `/api/admin/settings` | IST date-range analytics and read-only runtime settings. |
 | `/api/tickets/*`, `/api/payment/process` | Ticket details, QR image, billing, and simulated payment. |
 | `/api/analytics`, `/api/admin/reset-demo` | Administrator metrics and explicit demo reset action. |
 
@@ -193,6 +205,7 @@ UTC and converted to IST for display and IST-based daily/peak-hour reporting.
 │   ├── payment.html                # Ticket and payment UI
 │   ├── customer*.html              # Customer account pages
 │   ├── admin*.html                 # Administrator pages
+│   ├── admin-dashboard.js          # Administrator workspace routing and data views
 │   ├── app.js                      # Browser API and UI behavior
 │   ├── style.css                   # Shared styles
 │   └── admin.css                   # Administrator-specific styles
@@ -267,12 +280,23 @@ variables supplied by the host in deployments.
 | `ADMIN_PASSWORD` | Required in production | Configured administrator password; must be strong and unique. |
 | `DATABASE_URL` | Optional | PostgreSQL URL (or local SQLite URL during development); takes precedence over `SUPABASE_DB_URL`. |
 | `SUPABASE_DB_URL` | Required in production if `DATABASE_URL` is absent | Supabase PostgreSQL connection string. |
+| `DB_POOL_SIZE` | `1` | Persistent PostgreSQL connections per application process. Keep the total across all instances below the Supabase pooler limit. |
+| `DB_MAX_OVERFLOW` | `0` | Extra PostgreSQL connections above `DB_POOL_SIZE`; keep this at `0` with the Supabase session pooler unless connection capacity is confirmed. |
+| `DB_POOL_TIMEOUT` | `30` seconds | Maximum time a request waits to acquire a pooled database connection. |
 | `AUTO_CREATE_SCHEMA` | Development default `1`; production default `0` | Allows development schema creation; production schema changes must use reviewed migrations. |
 | `SESSION_COOKIE_SECURE` | Production default enabled | Set to `0` only for local HTTP. Keep enabled behind HTTPS. |
 | `DB_CONNECT_TIMEOUT` | `10` seconds | PostgreSQL connection timeout. |
 | `CORS_ORIGINS` | Localhost origins | Comma-separated allowed origins for direct cross-origin browser API requests. |
 | `FACILITY_LATITUDE`, `FACILITY_LONGITUDE` | Optional | Coordinates for the Leaflet marker and Google Maps Locate link. |
 | `RATE_*_BASE`, `RATE_*_HOURLY` | Configured defaults in `backend/config.py` | Vehicle-type pricing values. |
+
+Each app worker/process has its own SQLAlchemy pool. Budget the configured pool
+size across all app instances and any other clients using the same Supabase
+pooler. For serverless or higher-concurrency deployments, use the Supabase
+transaction-mode pooler rather than opening many session-mode connections.
+The admin payments listing selects payment fields only, while reservation and
+QR views use their own record-specific query. These admin views reuse existing
+database tables and do not require a schema migration.
 
 In production, `FLASK_SECRET_KEY` and `ADMIN_PASSWORD` must be at least 24
 characters and must not be template values. Use randomly generated,

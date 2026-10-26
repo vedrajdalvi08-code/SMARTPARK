@@ -13,6 +13,7 @@ from functools import wraps
 from flask import Blueprint, request, jsonify, session, session as flask_session, send_file
 from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, func, or_
 import qrcode
 from config import Config
 import database
@@ -844,10 +845,15 @@ def get_all_slots():
             ParkingSlot.zone.asc(),
             ParkingSlot.slot_number.asc()
         ).all()
+        serialized_slots = [slot.to_dict() for slot in slots]
+        admin = flask_session.get("admin_user")
+        if not admin or admin.get("role") != "ADMIN":
+            for slot_data in serialized_slots:
+                slot_data.pop("active_vehicle_number", None)
         return jsonify({
             "success": True,
             "count": len(slots),
-            "slots": [s.to_dict() for s in slots]
+            "slots": serialized_slots
         })
     finally:
         session.close()
@@ -1181,10 +1187,11 @@ def get_ticket_qr(ticket_code):
     try:
         clean_code = normalize_token(ticket_code)
         customer = flask_session.get("customer_user")
+        admin = flask_session.get("admin_user")
         ticket_query = session_db.query(Ticket).filter_by(ticket_code=clean_code, status="ACTIVE")
         if customer:
             ticket_query = ticket_query.filter(Ticket.user_id == customer.get("id"))
-        else:
+        elif not admin:
             ticket_query = ticket_query.filter(Ticket.user_id.is_(None))
         ticket = ticket_query.first()
         if not ticket:
@@ -1557,6 +1564,198 @@ def simulate_exit():
 # ANALYTICS & LOGS
 # ============================================================
 
+@api.route("/admin/records/<record_type>", methods=["GET"])
+@admin_required
+def get_admin_records(record_type):
+    """Return paginated administrator views over persisted customer and ticket data."""
+    allowed_types = {"users", "reservations", "payments", "qr"}
+    if record_type not in allowed_types:
+        return jsonify({"success": False, "error": "Unknown record type."}), 404
+
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+        page_size = min(100, max(1, int(request.args.get("page_size", "25"))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Page and page_size must be integers."}), 400
+
+    search = str(request.args.get("q", "")).strip()[:100]
+    status = str(request.args.get("status", "")).strip().upper()[:30]
+    session_db = database.SessionLocal()
+    try:
+        if record_type == "users":
+            query = session_db.query(User).filter(User.role == "CUSTOMER")
+            if search:
+                term = f"%{search}%"
+                query = query.filter(or_(
+                    User.username.ilike(term), User.full_name.ilike(term),
+                    User.email.ilike(term), User.phone.ilike(term)
+                ))
+            total = query.count()
+            rows = query.order_by(User.created_at.desc(), User.id.desc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size).all()
+            records = []
+            for user in rows:
+                ticket_count = session_db.query(func.count(Ticket.id)).filter(
+                    Ticket.user_id == user.id
+                ).scalar()
+                records.append({
+                    "id": user.id,
+                    "username": user.username,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "reservation_count": int(ticket_count or 0),
+                })
+        elif record_type == "payments":
+            query = session_db.query(
+                Ticket.id,
+                Ticket.ticket_code,
+                Ticket.vehicle_number,
+                Ticket.total_amount,
+                Ticket.payment_method,
+                Ticket.payment_status,
+                Ticket.transaction_id,
+                Ticket.status,
+            )
+            if search:
+                term = f"%{search}%"
+                query = query.filter(or_(
+                    Ticket.ticket_code.ilike(term),
+                    Ticket.vehicle_number.ilike(term),
+                    Ticket.transaction_id.ilike(term),
+                ))
+            if status and status not in {"PENDING", "PAID", "EXEMPT", "FAILED"}:
+                return jsonify({"success": False, "error": "Invalid payment status."}), 400
+            if status:
+                query = query.filter(Ticket.payment_status == status)
+
+            total = query.count()
+            rows = query.order_by(Ticket.id.desc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size).all()
+            records = [{
+                "id": row.id,
+                "ticket_code": row.ticket_code,
+                "vehicle_number": row.vehicle_number,
+                "total_amount": float(row.total_amount or 0),
+                "payment_method": row.payment_method,
+                "payment_status": row.payment_status,
+                "transaction_id": row.transaction_id,
+                "status": row.status,
+            } for row in rows]
+        else:
+            now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+            query = session_db.query(Ticket, User.username, ParkingSlot.slot_number).outerjoin(
+                User, Ticket.user_id == User.id
+            ).outerjoin(ParkingSlot, Ticket.slot_id == ParkingSlot.id)
+            if search:
+                term = f"%{search}%"
+                query = query.filter(or_(
+                    Ticket.ticket_code.ilike(term),
+                    Ticket.vehicle_number.ilike(term),
+                    Ticket.transaction_id.ilike(term),
+                    User.username.ilike(term)
+                ))
+            if record_type == "reservations":
+                if status and status not in {"ACTIVE", "COMPLETED", "CANCELLED"}:
+                    return jsonify({"success": False, "error": "Invalid reservation status."}), 400
+                if status:
+                    query = query.filter(Ticket.status == status)
+            else:
+                if status and status not in {"ACTIVE", "EXPIRED", "REVOKED", "CLOSED"}:
+                    return jsonify({"success": False, "error": "Invalid QR status."}), 400
+                if status == "ACTIVE":
+                    query = query.filter(
+                        Ticket.status == "ACTIVE", Ticket.qr_revoked_at.is_(None),
+                        or_(Ticket.qr_expires_at.is_(None), Ticket.qr_expires_at > now_utc)
+                    )
+                elif status == "EXPIRED":
+                    query = query.filter(
+                        Ticket.status == "ACTIVE", Ticket.qr_revoked_at.is_(None),
+                        Ticket.qr_expires_at <= now_utc
+                    )
+                elif status == "REVOKED":
+                    query = query.filter(Ticket.qr_revoked_at.is_not(None))
+                elif status == "CLOSED":
+                    query = query.filter(Ticket.status != "ACTIVE")
+
+            total = query.count()
+            rows = query.order_by(Ticket.created_at.desc(), Ticket.id.desc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size).all()
+            records = [{
+                "id": ticket.id,
+                "ticket_code": ticket.ticket_code,
+                "vehicle_number": ticket.vehicle_number,
+                "vehicle_type": ticket.vehicle_type,
+                "slot_number": slot_number,
+                "username": username,
+                "booking_time": ticket.booking_time.isoformat() if ticket.booking_time else None,
+                "entry_time": ticket.entry_time.isoformat() if ticket.entry_time else None,
+                "exit_time": ticket.exit_time.isoformat() if ticket.exit_time else None,
+                "duration_minutes": ticket.duration_minutes or 0,
+                "total_amount": float(ticket.total_amount or 0),
+                "payment_status": ticket.payment_status,
+                "payment_method": ticket.payment_method,
+                "transaction_id": ticket.transaction_id,
+                "status": ticket.status,
+                "qr_status": (
+                    "REVOKED" if ticket.qr_revoked_at
+                    else "EXPIRED" if _qr_token_expired(ticket.qr_expires_at, now_utc)
+                    else "ACTIVE" if ticket.status == "ACTIVE"
+                    else "CLOSED"
+                ),
+                "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+            } for ticket, username, slot_number in rows]
+
+        return jsonify({
+            "success": True,
+            "records": records,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": (total + page_size - 1) // page_size,
+            }
+        })
+    except Exception:
+        logger.exception("Administrator %s records request failed", record_type)
+        return jsonify({"success": False, "error": "Unable to load administrator records."}), 500
+    finally:
+        session_db.close()
+
+
+@api.route("/admin/settings", methods=["GET"])
+@admin_required
+def get_admin_settings():
+    """Expose non-secret runtime settings; rate changes are deployment-configured."""
+    return jsonify({
+        "success": True,
+        "editable": False,
+        "timezone": "Asia/Kolkata",
+        "currency": "INR",
+        "rates": {
+            vehicle_type: {
+                "base": float(rates["base"]),
+                "hourly": float(rates["hourly"]),
+            }
+            for vehicle_type, rates in Config.RATES.items()
+        },
+        "peak_hours": [{"start": start, "end": end} for start, end in Config.PEAK_HOURS],
+        "peak_multiplier": Config.PEAK_MULTIPLIER,
+        "facility": {
+            "latitude": float(Config.FACILITY_LATITUDE) if Config.FACILITY_LATITUDE else None,
+            "longitude": float(Config.FACILITY_LONGITUDE) if Config.FACILITY_LONGITUDE else None,
+        },
+        "integrations": {
+            "hardware": "disabled",
+            "payments": "development simulation",
+        },
+    })
+
+
 @api.route("/analytics", methods=["GET"])
 @admin_required
 def get_analytics():
@@ -1611,6 +1810,114 @@ def get_analytics():
         })
     finally:
         session.close()
+
+
+@api.route("/admin/analytics", methods=["GET"])
+@admin_required
+def get_admin_analytics():
+    """Return bounded, persisted analytics grouped on India-local calendar dates."""
+    today_ist = datetime.datetime.now(datetime.timezone.utc).astimezone(IST).date()
+    period = str(request.args.get("period", "7d")).strip().lower()
+    if period == "today":
+        start_date = end_date = today_ist
+    elif period in {"7d", "30d"}:
+        days = 7 if period == "7d" else 30
+        start_date, end_date = today_ist - datetime.timedelta(days=days - 1), today_ist
+    elif period == "custom":
+        try:
+            start_date = datetime.date.fromisoformat(request.args.get("start", ""))
+            end_date = datetime.date.fromisoformat(request.args.get("end", ""))
+        except ValueError:
+            return jsonify({"success": False, "error": "Custom dates must use YYYY-MM-DD."}), 400
+        if start_date > end_date or (end_date - start_date).days > 365:
+            return jsonify({"success": False, "error": "Select a valid date range of at most 366 days."}), 400
+    else:
+        return jsonify({"success": False, "error": "Period must be today, 7d, 30d, or custom."}), 400
+
+    start_utc = datetime.datetime.combine(
+        start_date, datetime.time.min, tzinfo=IST
+    ).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    end_utc = datetime.datetime.combine(
+        end_date + datetime.timedelta(days=1), datetime.time.min, tzinfo=IST
+    ).astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    session_db = database.SessionLocal()
+    try:
+        def within_range(column):
+            return and_(column >= start_utc, column < end_utc)
+
+        ticket_rows = session_db.query(
+            Ticket.created_at, Ticket.entry_time, Ticket.exit_time, Ticket.vehicle_type,
+            Ticket.duration_minutes, Ticket.total_amount, Ticket.payment_status, Ticket.status
+        ).filter(or_(
+            within_range(Ticket.created_at),
+            within_range(Ticket.entry_time),
+            within_range(Ticket.exit_time),
+        )).all()
+        daily = {}
+        vehicle_counts = {}
+        peak_hours = [0] * 24
+        paid_revenue = 0.0
+        completed_durations = []
+        tickets_created = 0
+        arrivals = 0
+        for created_at, entry_time, exit_time, vehicle_type, duration, amount, payment_status, status in ticket_rows:
+            if created_at and start_utc <= utc_naive(created_at) < end_utc:
+                local_created = utc_naive(created_at).replace(tzinfo=datetime.timezone.utc).astimezone(IST)
+                created_day = local_created.date().isoformat()
+                day = daily.setdefault(created_day, {"date": created_day, "tickets_created": 0, "arrivals": 0, "revenue": 0.0})
+                day["tickets_created"] += 1
+                tickets_created += 1
+            if entry_time and start_utc <= utc_naive(entry_time) < end_utc:
+                local_entry = utc_naive(entry_time).replace(tzinfo=datetime.timezone.utc).astimezone(IST)
+                entry_day = local_entry.date().isoformat()
+                day = daily.setdefault(entry_day, {"date": entry_day, "tickets_created": 0, "arrivals": 0, "revenue": 0.0})
+                day["arrivals"] += 1
+                arrivals += 1
+                vehicle_counts[vehicle_type] = vehicle_counts.get(vehicle_type, 0) + 1
+                peak_hours[local_entry.hour] += 1
+            if exit_time and start_utc <= utc_naive(exit_time) < end_utc and payment_status == "PAID":
+                local_exit = utc_naive(exit_time).replace(tzinfo=datetime.timezone.utc).astimezone(IST)
+                exit_day = local_exit.date().isoformat()
+                day = daily.setdefault(exit_day, {"date": exit_day, "tickets_created": 0, "arrivals": 0, "revenue": 0.0})
+                paid_revenue += float(amount or 0)
+                day["revenue"] += float(amount or 0)
+            if status == "COMPLETED" and exit_time and start_utc <= utc_naive(exit_time) < end_utc and duration and duration > 0:
+                completed_durations.append(int(duration))
+
+        date_count = (end_date - start_date).days + 1
+        series = []
+        for offset in range(date_count):
+            date_key = (start_date + datetime.timedelta(days=offset)).isoformat()
+            series.append(daily.get(date_key, {
+                "date": date_key, "tickets_created": 0, "arrivals": 0, "revenue": 0.0
+            }))
+
+        active_inventory = ParkingSlot.floor_level == 0
+        total_slots = session_db.query(ParkingSlot).filter(active_inventory).count()
+        occupied_slots = session_db.query(ParkingSlot).filter(
+            active_inventory, ParkingSlot.status == "OCCUPIED"
+        ).count()
+        return jsonify({
+            "success": True,
+            "range": {"start": start_date.isoformat(), "end": end_date.isoformat(), "timezone": "Asia/Kolkata"},
+            "metrics": {
+                "tickets_created": tickets_created,
+                "arrivals": arrivals,
+                "paid_revenue": round(paid_revenue, 2),
+                "average_duration_minutes": round(sum(completed_durations) / len(completed_durations), 1)
+                    if completed_durations else 0,
+                "current_occupancy_percent": round(occupied_slots / total_slots * 100, 1)
+                    if total_slots else 0,
+            },
+            "daily": series,
+            "vehicle_types": vehicle_counts,
+            "entry_hours_ist": peak_hours,
+        })
+    except Exception:
+        logger.exception("Administrator analytics request failed")
+        return jsonify({"success": False, "error": "Unable to load analytics."}), 500
+    finally:
+        session_db.close()
 
 
 # ============================================================

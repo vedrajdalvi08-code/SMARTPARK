@@ -1,63 +1,168 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
   <title>Operations dashboard | SMARTPARK</title>
-  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css?v=admin-reserved-editor">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin>
+  <link rel="stylesheet" href="/admin.css?v=admin-workspace">
 </head>
 <body class="admin-login-page">
-  <nav class="admin-shell-nav" aria-label="Operations navigation">
-    <a href="/admin" class="admin-brand"><span class="admin-brand-mark">SP</span><span><strong>SMARTPARK</strong><small>Operations</small></span></a>
-    <ul class="admin-nav-links"><li><a class="active" href="/admin">Overview</a></li><li><a href="/admin/scanner">QR scanner</a></li><li><a href="#parking">Parking slots</a></li><li><a href="#activityLog">Audit history</a></li><li><a href="/portals">Other portal</a></li></ul>
-    <div class="admin-nav-actions"><span class="admin-status-dot">● Live data</span><button class="admin-logout" type="button" onclick="adminLogout()">Log out</button></div>
-  </nav>
-  <main class="admin-workspace container">
-    <header class="admin-page-header"><div><div class="admin-login-kicker">Operations control center</div><h1>Parking overview</h1><p>Monitor persisted facility activity and process entry through the QR scanner.</p></div><a class="btn btn-primary" href="/admin/scanner">Open QR scanner</a></header>
-    <section class="stats-grid" aria-label="Live parking statistics">
-      <article class="stat-card"><div class="stat-label">Occupancy</div><div class="stat-value" id="adminOccupancyRate">--</div><div class="stat-desc">Current occupied capacity</div></article>
-      <article class="stat-card"><div class="stat-label">Arrivals today</div><div class="stat-value" id="adminVehiclesToday">--</div><div class="stat-desc">Persisted ticket records</div></article>
-      <article class="stat-card"><div class="stat-label">Paid revenue today</div><div class="stat-value" id="adminRevenueToday">--</div><div class="stat-desc">Recorded paid transactions</div></article>
-      <article class="stat-card"><div class="stat-label">System</div><div class="stat-value" style="font-size:1.25rem;color:var(--admin-accent)">Software only</div><div class="stat-desc">QR and database workflows</div></article>
-    </section>
-    <section id="parking" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Parking slots</div><span class="admin-status-dot">Live database view</span></div><p class="admin-slot-help">Reserved (yellow) and occupied slots have an <strong>Edit parking</strong> button. Edit vehicle or slot type, cancel a reservation, or force-remove an active parking session.</p><div id="parkingGrid" class="parking-grid"><p class="admin-empty">Loading slot availability…</p></div></section>
-    <section id="cashPaymentQueue" class="sim-box admin-data-section" aria-labelledby="cashPaymentQueueHeading">
-      <div class="sim-header"><div class="sim-title" id="cashPaymentQueueHeading">Cash payments awaiting confirmation</div><span class="admin-status-dot">Admin action required</span></div>
-      <p class="admin-slot-help">Confirm cash only after receiving it. Confirmation records payment and releases the occupied slot.</p>
-      <div id="cashPaymentList" aria-live="polite"><p class="admin-empty">Loading pending cash payments…</p></div>
-    </section>
-    <section id="activityLog" class="sim-box admin-data-section"><div class="sim-header"><div class="sim-title">Recent entry and exit activity</div><span class="admin-status-dot">Audit log</span></div><div id="adminGateLogFeed" class="log-terminal"><p class="admin-empty">Loading activity…</p></div></section>
-  </main>
+  <div class="admin-app-shell">
+    <aside class="admin-sidebar" aria-label="Administrator navigation">
+      <a href="/admin/overview" class="admin-brand">
+        <span class="admin-brand-mark">SP</span>
+        <span><strong>SMARTPARK</strong><small>Operations</small></span>
+      </a>
+      <nav class="admin-sidebar-nav">
+        <a href="/admin/overview" data-admin-page="overview">Overview</a>
+        <a href="/admin/analytics" data-admin-page="analytics">Analytics</a>
+        <a href="/admin/slots" data-admin-page="slots">Parking slots</a>
+        <a href="/admin/maps" data-admin-page="maps">Facility map</a>
+        <a href="/admin/qr" data-admin-page="qr">QR management</a>
+        <a href="/admin/reservations" data-admin-page="reservations">Reservations</a>
+        <a href="/admin/users" data-admin-page="users">Customers</a>
+        <a href="/admin/payments" data-admin-page="payments">Payments</a>
+        <a href="/admin/settings" data-admin-page="settings">Settings</a>
+        <a href="/admin/scanner">QR scanner</a>
+      </nav>
+      <div class="admin-sidebar-footer">
+        <span class="admin-status-dot"><span aria-hidden="true">●</span> Connected to live data</span>
+        <a href="/portals" class="admin-portal-link">Other portal</a>
+      </div>
+    </aside>
+
+    <div class="admin-main-shell">
+      <header class="admin-topbar">
+        <button id="adminMenuToggle" class="admin-menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+        <div>
+          <div class="admin-login-kicker">Operations control center</div>
+          <h1 id="adminPageTitle">Overview</h1>
+        </div>
+        <div class="admin-topbar-actions">
+          <button class="admin-theme-toggle" id="adminThemeToggle" type="button" aria-label="Toggle color theme">Toggle theme</button>
+          <button class="admin-logout" type="button" onclick="adminLogout()">Log out</button>
+        </div>
+      </header>
+
+      <main class="admin-workspace">
+        <section id="page-overview" class="admin-page-view" aria-labelledby="overviewHeading">
+          <div class="admin-page-header">
+            <div><h2 id="overviewHeading">Parking overview</h2><p>Live facility activity and operations requiring attention.</p></div>
+            <a class="btn btn-primary" href="/admin/scanner">Open QR scanner</a>
+          </div>
+          <section class="stats-grid" aria-label="Live parking statistics">
+            <article class="stat-card"><div class="stat-label">Occupancy</div><div class="stat-value" id="adminOccupancyRate">--</div><div class="stat-desc">Current occupied capacity</div></article>
+            <article class="stat-card"><div class="stat-label">Arrivals today</div><div class="stat-value" id="adminVehiclesToday">--</div><div class="stat-desc">Persisted ticket records</div></article>
+            <article class="stat-card"><div class="stat-label">Paid revenue today</div><div class="stat-value" id="adminRevenueToday">--</div><div class="stat-desc">Recorded paid transactions</div></article>
+            <article class="stat-card"><div class="stat-label">Facility systems</div><div class="stat-value admin-software-status">Software only</div><div class="stat-desc">Hardware integrations are disabled</div></article>
+          </section>
+          <section id="cashPaymentQueue" class="sim-box admin-data-section" aria-labelledby="cashPaymentQueueHeading">
+            <div class="sim-header"><div class="sim-title" id="cashPaymentQueueHeading">Cash payments awaiting confirmation</div><span class="admin-status-dot">Admin action required</span></div>
+            <p class="admin-slot-help">Confirm cash only after receiving it. Confirmation records payment and releases the occupied slot.</p>
+            <div id="cashPaymentList" aria-live="polite"><p class="admin-empty">Loading pending cash payments…</p></div>
+          </section>
+          <section id="activityLog" class="sim-box admin-data-section">
+            <div class="sim-header"><div class="sim-title">Recent entry and exit activity</div><span class="admin-status-dot">Audit log</span></div>
+            <div id="adminGateLogFeed" class="log-terminal"><p class="admin-empty">Loading activity…</p></div>
+          </section>
+        </section>
+
+        <section id="page-analytics" class="admin-page-view" aria-labelledby="analyticsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="analyticsHeading">Facility analytics</h2><p>Summaries are calculated from persisted tickets and displayed in IST.</p></div>
+            <div class="admin-filter-row"><label for="analyticsPeriod">Date range</label><select id="analyticsPeriod" class="form-select"><option value="today">Today</option><option value="7d" selected>Last 7 days</option><option value="30d">Last 30 days</option><option value="custom">Custom</option></select>
+              <label for="analyticsStart" class="sr-only">Start date</label><input id="analyticsStart" class="form-input" type="date" hidden>
+              <label for="analyticsEnd" class="sr-only">End date</label><input id="analyticsEnd" class="form-input" type="date" hidden>
+              <button id="analyticsApply" class="btn btn-primary" type="button">Apply</button>
+            </div>
+          </div>
+          <div id="analyticsMessage" class="admin-inline-message" role="status"></div>
+          <div class="stats-grid">
+            <article class="stat-card"><div class="stat-label">Arrivals</div><div class="stat-value" id="analyticsArrivals">--</div><div class="stat-desc">Checked-in sessions in selected range</div></article>
+            <article class="stat-card"><div class="stat-label">Paid revenue</div><div class="stat-value" id="analyticsRevenue">--</div><div class="stat-desc">Recorded paid transactions</div></article>
+            <article class="stat-card"><div class="stat-label">Average duration</div><div class="stat-value" id="analyticsDuration">--</div><div class="stat-desc">Completed ticket duration</div></article>
+            <article class="stat-card"><div class="stat-label">Current occupancy</div><div class="stat-value" id="analyticsOccupancy">--</div><div class="stat-desc">Live occupied capacity</div></article>
+          </div>
+          <div class="admin-chart-grid">
+            <section class="sim-box admin-data-section"><h3>Arrivals and paid revenue</h3><div id="analyticsArrivalChart" class="admin-chart" role="img" aria-label="Daily ticket arrivals"></div><div id="analyticsRevenueChart" class="admin-chart" role="img" aria-label="Daily paid revenue"></div></section>
+            <section class="sim-box admin-data-section"><h3>Entry time by hour (IST)</h3><div id="analyticsHourChart" class="admin-chart" role="img" aria-label="Entry counts by India-local hour"></div></section>
+          </div>
+          <section class="sim-box admin-data-section"><h3>Vehicle type mix</h3><div id="analyticsVehicleTypes" class="admin-chip-list"></div></section>
+        </section>
+
+        <section id="page-slots" class="admin-page-view" aria-labelledby="slotsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="slotsHeading">Parking slots</h2><p>Reserved (yellow) and occupied slots have an <strong>Edit parking</strong> action. Select a slot to update its vehicle or type, cancel a reservation, or force-remove an active session.</p></div></div>
+          <div class="admin-filter-row" aria-label="Filter parking slots">
+            <button class="tab-btn active" type="button" onclick="filterSlots('ALL', this)">All</button>
+            <button class="tab-btn" type="button" onclick="filterSlots('A', this)">Zone A</button>
+            <button class="tab-btn" type="button" onclick="filterSlots('B', this)">Zone B</button>
+            <button class="tab-btn" type="button" onclick="filterSlots('EV', this)">EV</button>
+          </div>
+          <section class="sim-box admin-data-section"><div id="parkingGrid" class="parking-grid"><p class="admin-empty">Loading slot availability…</p></div></section>
+        </section>
+
+        <section id="page-maps" class="admin-page-view" aria-labelledby="mapsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="mapsHeading">Facility map</h2><p>Configured facility location and current ground-floor capacity.</p></div><a id="locateFacility" class="btn btn-primary" href="#" target="_blank" rel="noopener" hidden>Get directions</a></div>
+          <div class="admin-map-summary">
+            <article class="stat-card"><div class="stat-label">Total slots</div><div class="stat-value" id="statTotalSlots">--</div></article>
+            <article class="stat-card"><div class="stat-label">Available</div><div class="stat-value" id="statAvailSlots">--</div></article>
+            <article class="stat-card"><div class="stat-label">Occupied</div><div class="stat-value" id="statOccupiedSlots">--</div></article>
+            <article class="stat-card"><div class="stat-label">Occupancy</div><div class="stat-value" id="statOccupancyRate">--</div></article>
+          </div>
+          <section class="sim-box admin-map-card"><div id="facilityMap" class="parking-map-container" role="img" aria-label="Map showing the configured SMARTPARK facility"></div><p id="facilityMapMessage" class="admin-inline-message" role="status"></p></section>
+          <section class="sim-box admin-data-section"><h3>Indoor slot layout</h3><p>View and edit bays by zone using the <a href="/admin/slots">parking slots page</a>.</p></section>
+        </section>
+
+        <section id="page-qr" class="admin-page-view" aria-labelledby="qrHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="qrHeading">QR management</h2><p>Inspect ticket QR status. QR images are generated by the authenticated application.</p></div><a class="btn btn-primary" href="/admin/scanner">Open scanner</a></div>
+          <div class="admin-record-controls"><label for="qrSearch">Search</label><input id="qrSearch" class="form-input" type="search" placeholder="Ticket or vehicle"><label for="qrStatus">Status</label><select id="qrStatus" class="form-select"><option value="">All statuses</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option><option value="REVOKED">Revoked</option><option value="CLOSED">Closed</option></select><button class="btn btn-primary" type="button" data-record-load="qr">Search</button></div>
+          <div id="qrTable" class="admin-table-wrap" aria-live="polite"></div><div id="qrPagination" class="admin-pagination"></div>
+        </section>
+
+        <section id="page-reservations" class="admin-page-view" aria-labelledby="reservationsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="reservationsHeading">Reservations</h2><p>Bookings and sessions recorded by SMARTPARK.</p></div></div>
+          <div class="admin-record-controls"><label for="reservationSearch">Search</label><input id="reservationSearch" class="form-input" type="search" placeholder="Ticket, vehicle, or customer"><label for="reservationStatus">Status</label><select id="reservationStatus" class="form-select"><option value="">All statuses</option><option>ACTIVE</option><option>COMPLETED</option><option>CANCELLED</option></select><button class="btn btn-primary" type="button" data-record-load="reservations">Search</button></div>
+          <div id="reservationsTable" class="admin-table-wrap" aria-live="polite"></div><div id="reservationsPagination" class="admin-pagination"></div>
+        </section>
+
+        <section id="page-users" class="admin-page-view" aria-labelledby="usersHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="usersHeading">Customers</h2><p>Customer profiles and reservation totals. Password data is never exposed.</p></div></div>
+          <div class="admin-record-controls"><label for="userSearch">Search</label><input id="userSearch" class="form-input" type="search" placeholder="Name, username, email, or phone"><button class="btn btn-primary" type="button" data-record-load="users">Search</button></div>
+          <div id="usersTable" class="admin-table-wrap" aria-live="polite"></div><div id="usersPagination" class="admin-pagination"></div>
+        </section>
+
+        <section id="page-payments" class="admin-page-view" aria-labelledby="paymentsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="paymentsHeading">Payments</h2><p>Payment statuses and transaction references recorded by the application. No real payment processing is connected.</p></div></div>
+          <div class="admin-record-controls"><label for="paymentSearch">Search</label><input id="paymentSearch" class="form-input" type="search" placeholder="Ticket, vehicle, or transaction"><label for="paymentStatus">Status</label><select id="paymentStatus" class="form-select"><option value="">All statuses</option><option>PENDING</option><option>PAID</option><option>EXEMPT</option><option>FAILED</option></select><button class="btn btn-primary" type="button" data-record-load="payments">Search</button></div>
+          <div id="paymentsTable" class="admin-table-wrap" aria-live="polite"></div><div id="paymentsPagination" class="admin-pagination"></div>
+        </section>
+
+        <section id="page-settings" class="admin-page-view" aria-labelledby="settingsHeading" hidden>
+          <div class="admin-page-header"><div><h2 id="settingsHeading">Settings</h2><p>Current deployment configuration. Changes require updating the secured server environment and redeploying.</p></div></div>
+          <div id="settingsMessage" class="admin-inline-message" role="status">Loading settings…</div>
+          <div class="admin-settings-grid" id="adminSettingsGrid"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="adminParkingEditor" role="dialog" aria-modal="true" aria-labelledby="adminParkingEditorTitle" aria-hidden="true">
     <section class="modal-content admin-parking-editor">
-      <div class="modal-header">
-        <h2 id="adminParkingEditorTitle">Edit parking</h2>
-        <button class="modal-close" type="button" aria-label="Close editor" onclick="closeAdminParkingEditor()">&times;</button>
-      </div>
+      <div class="modal-header"><h2 id="adminParkingEditorTitle">Edit parking</h2><button class="modal-close" type="button" aria-label="Close editor" onclick="closeAdminParkingEditor()">&times;</button></div>
       <p class="admin-parking-editor-slot" id="adminParkingEditorSlot"></p>
       <form id="adminParkingEditorForm">
-        <div class="form-group">
-          <label class="form-label" for="adminParkingVehicleNumber">Vehicle number</label>
-          <input class="form-input" id="adminParkingVehicleNumber" maxlength="25" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="adminParkingSlotType">Parking slot type</label>
-          <select class="form-select" id="adminParkingSlotType" required>
-            <option value="TWO_WHEELER">Two-wheeler</option>
-            <option value="COMPACT">Compact</option>
-            <option value="SUV">SUV</option>
-            <option value="EV">EV</option>
-          </select>
-        </div>
+        <div class="form-group"><label class="form-label" for="adminParkingVehicleNumber">Vehicle number</label><input class="form-input" id="adminParkingVehicleNumber" maxlength="25" required></div>
+        <div class="form-group"><label class="form-label" for="adminParkingSlotType">Parking slot type</label><select class="form-select" id="adminParkingSlotType" required><option value="TWO_WHEELER">Two-wheeler</option><option value="COMPACT">Compact</option><option value="SUV">SUV</option><option value="EV">EV</option></select></div>
         <p class="admin-parking-editor-message" id="adminParkingEditorMessage" role="status"></p>
-        <div class="admin-parking-editor-actions">
-          <button class="btn btn-primary" type="submit">Save changes</button>
-          <button class="btn btn-danger" id="adminForceRemoveParking" type="button">Delete / force remove</button>
-        </div>
+        <div class="admin-parking-editor-actions"><button class="btn btn-primary" type="submit">Save changes</button><button class="btn btn-danger" id="adminForceRemoveParking" type="button">Delete / force remove</button></div>
         <p class="admin-parking-editor-note" id="adminParkingEditorNote"></p>
       </form>
     </section>
   </div>
-  <script src="/app.js?v=admin-reserved-editor"></script>
-  <script>document.addEventListener('DOMContentLoaded', () => { loadAnalytics(); });</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
+  <script src="/app.js?v=admin-workspace"></script>
+  <script src="/admin-dashboard.js?v=admin-workspace"></script>
 </body>
 </html>

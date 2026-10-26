@@ -30,6 +30,12 @@ currently active reservations and sessions are allowed to finish and their
 slots remain retired when released. The application does not run migrations at
 startup.
 
+The administrator workspace's paginated records, IST analytics, and
+read-only settings APIs use existing tables; deploying these views does not
+require an additional migration. The payments view reads only payment-related
+ticket columns. Database client-pool limits are application configuration,
+not schema changes.
+
 For a disposable PostgreSQL test database, use the repository harness from the
 project root:
 
